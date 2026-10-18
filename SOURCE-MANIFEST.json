@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "sdkName": "@cynayd/accessops-first-party-app-connnect-sdk",
-  "sourceSelection": "The current Calendar, Vault, and Forms helper files are byte-identical. No unique Git-tracked canonical source can be established from the available checkouts. The SDK preserves the helper implementation; its file has a conventional trailing newline.",
+  "sourceSelection": "Derived from the original byte-identical Calendar, Vault, and Forms snapshot with the security changes listed in sdkChanges. Original source hashes below describe the historical baseline, not the current patched helper.",
   "exportedHelper": {
     "path": "src/application-authorization.ts",
-    "sha256": "cba92c9d5fc2656f0fc5d435eba916b3e2e8d1493342cdfdeb60036fd5ab5833",
+    "sha256": "9d9ba6597bc3a996adc1ec673a7e5e7d9418386b1c5311085f35f17e0a0c17e8",
     "upstreamContentSha256": "33f324f7e2f08a9fb481fb0886ac2fb69ab749e9edaca93a01bcfe6988d2de66",
-    "difference": "The only byte-level difference from upstream is the final newline."
+    "difference": "Includes DENY envelope/target validation and contradictory/resource-scope response rejection; no longer differs from the historical app snapshots only by a newline."
   },
   "originalSources": [
     {
@@ -33,9 +33,9 @@
     {
       "exportedPath": "test/application-authorization.test.ts",
       "originalPath": "vault/src/__tests__/application-authorization.test.ts",
-      "change": "The relative import path was adjusted for the standalone package and a conventional final newline was added.",
+      "change": "Original adapted tests plus malformed/mismatched DENY, whole-app resource-target and real EdDSA signature regressions.",
       "originalSha256": "595ef7f404a478d02267f610cf5dced13d165c82f87ea9d879fd3035def1dd02",
-      "sdkSha256": "7be23d5ab9c160e03af4b07ffe57b525be51ce62aa8b7e1359330ec8783cfc4f",
+      "sdkSha256": "42f3e0a204f09cb864f46259a3ff59ce7ec3d12a2828193d543979155dee5ca7",
       "gitCommit": null,
       "checkoutStatus": "The Vault checkout has no Git metadata."
     },
@@ -44,6 +44,13 @@
       "sha256": "c64daf77e6bc308e4da505a7c496c36fe8955832ceeaa4272aafa6c5892242fa",
       "gitCommit": null,
       "checkoutStatus": "Calendar integration test retained in the host application; it depends on Calendar middleware and is not part of the helper-only SDK test target."
+    }
+  ],
+  "sdkChanges": [
+    {
+      "version": "0.1.1",
+      "baseSdkCommit": "a21419453753df5c913d2f23897fc51c9895a487",
+      "change": "Validate common availability, launch source, installation and exact authority target before ALLOW or DENY; malformed/mismatched/contradictory DENY returns 503. Reject resource targets for whole-app evaluation."
     }
   ]
 }

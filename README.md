@@ -9,7 +9,7 @@ This package contains the current `checkApplicationAccess` helper and its focuse
 - Requires Node.js 18.17 or later for built-in `fetch`, `AbortController`, and Node crypto APIs.
 - Runtime dependencies: none beyond Node.js built-ins and global `fetch`.
 - Development dependencies: TypeScript, Jest, ts-jest, and Node/Jest type definitions.
-- The Calendar, Vault, and Forms helper files in the source workspace have the same SHA-256 digest. The SDK preserves their implementation; its only byte-level difference is a conventional final newline. Their source checkouts do not provide a tracked commit for the helper: Calendar and Vault have no Git metadata, and Forms' helper is untracked. See [SOURCE-MANIFEST.json](SOURCE-MANIFEST.json) for paths, hashes, and the Forms checkout HEAD. This snapshot does not claim an upstream commit that could not be verified.
+- Version 0.1.1 derives from the original Calendar/Vault/Forms snapshot and adds authority-proof validation before interpreting DENY. Original source hashes remain historical provenance in [SOURCE-MANIFEST.json](SOURCE-MANIFEST.json); they do not describe the current patched helper. Consuming applications must pin the new SDK commit and update matching copies together.
 
 ## Install from a private GitHub repository
 
@@ -70,7 +70,7 @@ The function `applicationAuthorizationEnabled()` exactly reflects `ACCESSOPS_APP
 
 Use the validated CYNAYD `personId` and `organizationId`, exact AccessOps `installedAppId`, and exact canonical `applicationKey`. The evaluator target is whole-app `ACCESS` with no resource ID. Never derive these identifiers from email, display name, slug, or an app-local account ID. If SSO omits the installation ID, use the explicit organization mapping below and reject any mismatch.
 
-The helper calls `POST /api/v1/accessops/launch/product-evaluate` with a scoped service identity. It accepts only an exact matching `ALLOW` response with `availability: AVAILABLE`, `launchSource: ACCESSOPS`, effective access, launch readiness, and a valid epoch. `DENY` is 403; malformed, mismatched, unavailable, or transport results fail closed as 503. An epoch mismatch denies the session and requires reauthentication.
+The helper calls `POST /api/v1/accessops/launch/product-evaluate` with a scoped service identity. It accepts only an exact matching `ALLOW` response with `availability: AVAILABLE`, `launchSource: ACCESSOPS`, effective access, launch readiness, and a valid epoch. `DENY` is 403 only after `availability: AVAILABLE`, `launchSource: ACCESSOPS`, the exact root installation and full authority target have been validated. A denial cannot claim effective or launch-ready access. Denials do not mint a session, so a denial epoch is not required. Bare, mismatched, contradictory, resource-scoped, unavailable or transport responses are 503; callers must not invalidate cached authenticated data based on those unavailable responses. An epoch mismatch denies the session and requires reauthentication.
 
 ## Environment variables
 
@@ -86,6 +86,8 @@ Set values through the host's secret/configuration manager. This repository does
 | `GATEWAY_ACTOR_TRUST_SECRET` | Optional | Produces the request-bound gateway actor proof header when configured. |
 | `ACCESSOPS_APPLICATION_INSTALLATIONS` | Conditional | JSON object mapping exact organization IDs to exact installed-app IDs when initial SSO does not supply the ID. Example shape: `{"org-id":"installed-app-id"}`. |
 | `ACCESSOPS_APPLICATION_AUTHORIZATION_ENABLED` | Host wiring | Enables the host's feature gate only when its value is exactly `true`; production guards must fail closed otherwise. |
+
+**Current platform compatibility:** the reviewed product service verifier is EdDSA-only. This release must use a registered Ed25519 private key and explicit matching `SERVICE_AUTH_KID`, or a pre-issued EdDSA service JWT with that registered KID. `SERVICE_AUTH_SECRET` HMAC tokens are not accepted by that verifier. The generic fallback remains for other compatible deployments; its presence is not platform certification. The exact app, installation, public key/KID, and service scope still require platform registration.
 
 The helper requires one of `ACCESSOPS_SERVICE_TOKEN`, `SERVICE_AUTH_PRIVATE_KEY_PEM`, or `SERVICE_AUTH_SECRET`. Never log token/key values or return them in errors. `ACCESSOPS_APPLICATION_INSTALLATIONS` is identity configuration, not a secret substitute or an app-key registry.
 
@@ -108,3 +110,6 @@ The focused suite is based on Vault's existing helper tests and exercises exact 
 - Deny on 403; fail closed on 503, timeout, bad response, or missing credentials.
 - Test every authenticated HTTP, realtime/socket, and user-scoped background path, plus separate guest behavior.
 - Review dependency lockfile, pinned Git tag, secrets handling, and production rollout before release.
+## Certification gates
+
+For Connect, verify all three exact allowlists before advertising managed access: backend application authority, product service identity, and platform frontend managed targets. The SDK does not enable any gate. A marketplace record, installation declaration, or environment flag alone is insufficient.

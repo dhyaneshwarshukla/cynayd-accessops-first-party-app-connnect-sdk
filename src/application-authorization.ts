@@ -65,13 +65,22 @@ export async function checkApplicationAccess(applicationKey: string, scope: Appl
     });
     if (!response.ok) return unavailable();
     const body = await response.json() as Record<string,unknown>;
-    if (body.availability === 'UNAVAILABLE') return unavailable();
-    if (body.decision === 'DENY') return deny('APPLICATION_ACCESS_DENIED');
-    if (body.decision !== 'ALLOW' || body.availability !== 'AVAILABLE' || body.launchSource !== 'ACCESSOPS' || body.effectiveAccess !== true || body.launchReady !== true) return unavailable();
+    // An HTTP 200 is not an authority proof. Validate the common envelope and
+    // exact whole-app target before interpreting either ALLOW or DENY.
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      body.availability !== 'AVAILABLE' || body.launchSource !== 'ACCESSOPS') return unavailable();
     const target = body.authorityTarget as Record<string,unknown> | undefined;
-    if (!target || target.organizationId !== organizationId || target.personId !== personId ||
+    if (!target || typeof target !== 'object' || Array.isArray(target) ||
+      target.organizationId !== organizationId || target.personId !== personId ||
       target.installationId !== installedAppId || target.applicationId !== applicationKey || target.permission !== 'ACCESS' ||
-      body.installedAppId !== installedAppId || !validEpoch(body.launchAccessEpoch)) return unavailable();
+      (target.resourceId !== undefined && target.resourceId !== null) || body.installedAppId !== installedAppId) return unavailable();
+    if (body.decision === 'DENY') {
+      // A denial cannot simultaneously claim effective/launch-ready access.
+      if (body.effectiveAccess === true || body.launchReady === true) return unavailable();
+      return deny('APPLICATION_ACCESS_DENIED');
+    }
+    if (body.decision !== 'ALLOW' || body.effectiveAccess !== true || body.launchReady !== true ||
+      !validEpoch(body.launchAccessEpoch)) return unavailable();
     if (!options.initial && scope.launchAccessEpoch !== body.launchAccessEpoch) return deny('ACCESS_EPOCH_STALE');
     return {installedAppId,launchAccessEpoch:body.launchAccessEpoch};
   } catch (cause) {
