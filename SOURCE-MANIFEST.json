@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "sdkName": "@cynayd/accessops-first-party-app-connnect-sdk",
+  "sourceSelection": "The current Calendar, Vault, and Forms helper files are byte-identical. No unique Git-tracked canonical source can be established from the available checkouts. The SDK preserves the helper implementation; its file has a conventional trailing newline.",
+  "exportedHelper": {
+    "path": "src/application-authorization.ts",
+    "sha256": "cba92c9d5fc2656f0fc5d435eba916b3e2e8d1493342cdfdeb60036fd5ab5833",
+    "upstreamContentSha256": "33f324f7e2f08a9fb481fb0886ac2fb69ab749e9edaca93a01bcfe6988d2de66",
+    "difference": "The only byte-level difference from upstream is the final newline."
+  },
+  "originalSources": [
+    {
+      "path": "calender/src/accessops/application-authorization.ts",
+      "gitCommit": null,
+      "checkoutStatus": "The Calendar checkout has no Git metadata.",
+      "sha256": "33f324f7e2f08a9fb481fb0886ac2fb69ab749e9edaca93a01bcfe6988d2de66"
+    },
+    {
+      "path": "vault/src/accessops/application-authorization.ts",
+      "gitCommit": null,
+      "checkoutStatus": "The Vault checkout has no Git metadata.",
+      "sha256": "33f324f7e2f08a9fb481fb0886ac2fb69ab749e9edaca93a01bcfe6988d2de66"
+    },
+    {
+      "path": "forms/cynayd-forms-backend/src/accessops/application-authorization.ts",
+      "gitCommit": null,
+      "checkoutHead": "46fdd938fa6f89c5e33c7ac579156ad224fa0735",
+      "checkoutStatus": "The helper is untracked in this Git checkout; checkout HEAD is provenance context, not the helper's source commit.",
+      "sha256": "33f324f7e2f08a9fb481fb0886ac2fb69ab749e9edaca93a01bcfe6988d2de66"
+    }
+  ],
+  "testSources": [
+    {
+      "exportedPath": "test/application-authorization.test.ts",
+      "originalPath": "vault/src/__tests__/application-authorization.test.ts",
+      "change": "The relative import path was adjusted for the standalone package and a conventional final newline was added.",
+      "originalSha256": "595ef7f404a478d02267f610cf5dced13d165c82f87ea9d879fd3035def1dd02",
+      "sdkSha256": "7be23d5ab9c160e03af4b07ffe57b525be51ce62aa8b7e1359330ec8783cfc4f",
+      "gitCommit": null,
+      "checkoutStatus": "The Vault checkout has no Git metadata."
+    },
+    {
+      "originalPath": "calender/src/middleware/__tests__/calendar-application-authorization.test.ts",
+      "sha256": "c64daf77e6bc308e4da505a7c496c36fe8955832ceeaa4272aafa6c5892242fa",
+      "gitCommit": null,
+      "checkoutStatus": "Calendar integration test retained in the host application; it depends on Calendar middleware and is not part of the helper-only SDK test target."
+    }
+  ]
+}
