@@ -9,7 +9,7 @@ This package contains the current `checkApplicationAccess` helper and its focuse
 - Requires Node.js 18.17 or later for built-in `fetch`, `AbortController`, and Node crypto APIs.
 - Runtime dependencies: none beyond Node.js built-ins and global `fetch`.
 - Development dependencies: TypeScript, Jest, ts-jest, and Node/Jest type definitions.
-- The Calendar, Vault, and Forms helper files in the source workspace have the same SHA-256 digest. The SDK preserves their implementation; its only byte-level difference is a conventional final newline. Their source checkouts do not provide a tracked commit for the helper: Calendar and Vault have no Git metadata, and Forms' helper is untracked. See [SOURCE-MANIFEST.json](SOURCE-MANIFEST.json) for paths, hashes, and the Forms checkout HEAD. This snapshot does not claim an upstream commit that could not be verified.
+- The Calendar, Vault, and Forms helper files in the source workspace have the same SHA-256 digest. Release 0.1.0 preserved their implementation. Release 0.1.1 corrects it for the EdDSA product endpoint described below. Their source checkouts do not provide a tracked commit for the helper: Calendar and Vault have no Git metadata, and Forms' helper is untracked. See [SOURCE-MANIFEST.json](SOURCE-MANIFEST.json) for paths, hashes, and the Forms checkout HEAD. This snapshot does not claim an upstream commit that could not be verified.
 
 ## Install from a private GitHub repository
 
@@ -79,15 +79,15 @@ Set values through the host's secret/configuration manager. This repository does
 | Variable | Required | Purpose |
 |---|---|---|
 | `ACCESSOPS_BASE_URL` or `ACCESSOPS_URL` | Yes, one | Server-side AccessOps base URL. `ACCESSOPS_BASE_URL` takes precedence. |
-| `ACCESSOPS_SERVICE_TOKEN` | One auth option | Pre-provisioned service bearer token accepted by the AccessOps endpoint. |
-| `SERVICE_AUTH_PRIVATE_KEY_PEM` | Alternative auth option | PEM private key used to sign a short-lived EdDSA service token. |
-| `SERVICE_AUTH_SECRET` | Alternative auth option | HMAC secret used to sign a short-lived HS256 service token when no private key is set. |
-| `SERVICE_AUTH_KID` | Optional | Key identifier for the minted token; defaults to the application key. |
-| `GATEWAY_ACTOR_TRUST_SECRET` | Optional | Produces the request-bound gateway actor proof header when configured. |
-| `ACCESSOPS_APPLICATION_INSTALLATIONS` | Conditional | JSON object mapping exact organization IDs to exact installed-app IDs when initial SSO does not supply the ID. Example shape: `{"org-id":"installed-app-id"}`. |
+| `ACCESSOPS_SERVICE_TOKEN` | Unsupported | Legacy static tokens are not used by 0.1.1. |
+| `SERVICE_AUTH_PRIVATE_KEY_PEM` | Yes | PEM private key used to sign a short-lived EdDSA service token. |
+| `SERVICE_AUTH_SECRET` | Unsupported | Legacy HMAC credentials are not used by 0.1.1. |
+| `SERVICE_AUTH_KID` | Yes | Explicit registered key identifier. |
+| `GATEWAY_ACTOR_TRUST_SECRET` | Unused | Product evaluation authenticates only the scoped EdDSA credential. |
+| `ACCESSOPS_APPLICATION_INSTALLATIONS` | Yes | Exact organization-to-installation allowlist, including sessions that already claim an installation. |
 | `ACCESSOPS_APPLICATION_AUTHORIZATION_ENABLED` | Host wiring | Enables the host's feature gate only when its value is exactly `true`; production guards must fail closed otherwise. |
 
-The helper requires one of `ACCESSOPS_SERVICE_TOKEN`, `SERVICE_AUTH_PRIVATE_KEY_PEM`, or `SERVICE_AUTH_SECRET`. Never log token/key values or return them in errors. `ACCESSOPS_APPLICATION_INSTALLATIONS` is identity configuration, not a secret substitute or an app-key registry.
+The helper requires `SERVICE_AUTH_PRIVATE_KEY_PEM` and `SERVICE_AUTH_KID`. Never log token/key values or return them in errors. `ACCESSOPS_APPLICATION_INSTALLATIONS` is identity configuration, not a secret substitute or an app-key registry.
 
 ## Development and checks
 
@@ -108,3 +108,15 @@ The focused suite is based on Vault's existing helper tests and exercises exact 
 - Deny on 403; fail closed on 503, timeout, bad response, or missing credentials.
 - Test every authenticated HTTP, realtime/socket, and user-scoped background path, plus separate guest behavior.
 - Review dependency lockfile, pinned Git tag, secrets handling, and production rollout before release.
+
+## Corrected product-evaluate release 0.1.1
+
+Use `checkApplicationAccess(canonicalKey, verifiedScope, {initial: true})` only after server identity validation. Store the returned installation and epoch in the signed session; omit `initial` for every subsequent request, person job, socket handshake and protected message. Resource ACLs still apply. The exported enabled flag is only an application rollout switch; the check itself never bypasses authority.
+
+Required server configuration: `ACCESSOPS_BASE_URL` is an HTTPS origin; `ACCESSOPS_APPLICATION_INSTALLATIONS` is an exact organization-to-installation JSON object; `SERVICE_AUTH_PRIVATE_KEY_PEM` is the protected Ed25519 key loaded by the host secret mechanism; `SERVICE_AUTH_KID` is its registered KID. Never expose these to browser code. `ACCESSOPS_APPLICATION_AUTHORIZATION_ENABLED=true` is set only after integration and registration on the approved test deployment. Keep SSO configuration separate.
+
+The only credential is `Authorization: Bearer <EdDSA JWT>`. The existing verifier convention fixes `serviceId` to canonical application key, audience to `accessops-service`, scope to the single `accessops.launch.evaluate`, and binds organizationId/personId/installationId/applicationKey. Header is alg EdDSA, typ JWT, registered kid. Claims use `issuedAt`/`expiresAt` (seconds), plus alg/kid; the helper issues 30 seconds, the server accepts at most 60 seconds and at most 5 seconds future issuance. Do not replace these with standard JWT claim names without changing both sides. No HMAC/static-token fallback or privileged actor headers are sent. Redirects are rejected. The timeout is 3 seconds.
+
+Every decision is fetched anew: no positive cache, no time-based decision reuse. `ALLOW` must have AVAILABLE, ACCESSOPS source, effectiveAccess and launchReady true, exact authorityTarget organization/person/installation/application/ACCESS, matching installedAppId and positive integer launchAccessEpoch. A session epoch mismatch requires reauthentication. DENY maps to 403, transport/non-2xx/malformed/incomplete responses to 503. There is no decision-issued-at claim in the current response contract: freshness is established by a new request and session epoch comparison, rather than an invented decision TTL. Revoke applies on the next protected evaluation. Persistent sockets must implement repeated checks and close/reject on failure; the helper does not schedule them. System ingestion without a person needs an explicit separate policy and is not authorized by an employee ALLOW.
+
+Version plus the release tarball SHA-256 in `ACCESSOPS_THREE_APPS_HANDOFF.md` pins the corrected distribution. This package is prepared locally; it does not imply organizational release approval, registration or deployment.

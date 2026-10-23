@@ -1,6 +1,6 @@
 {
   "name": "@cynayd/accessops-first-party-app-connnect-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "First-party CYNAYD application authorization client for AccessOps.",
   "license": "UNLICENSED",

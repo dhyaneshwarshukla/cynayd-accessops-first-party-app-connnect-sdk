@@ -1,7 +1,7 @@
-import {createHmac,createPrivateKey,randomUUID,sign} from 'crypto';
+import {createPrivateKey,sign} from 'crypto';
 /** Request-time whole-application authorization. No positive cache or role bypass.
  * The caller must verify its session credential before supplying this scope.
- * Keep the copies in Calendar, Vault and Forms identical (checked in release tests).
+ * EdDSA product-evaluate contract; app resource ACLs remain separate.
  */
 export type ApplicationSession = { personId: string; organizationId: string;
   installedAppId?: unknown; launchAccessEpoch?: unknown };
@@ -31,36 +31,31 @@ export async function checkApplicationAccess(applicationKey: string, scope: Appl
   const configured = configuredInstallation(organizationId);
   const claimed = text(scope.installedAppId);
   if (claimed && configured && claimed !== configured) return deny('APPLICATION_TARGET_MISMATCH');
-  const installedAppId = claimed || configured;
+  if (!configured) return deny('APPLICATION_INSTALLATION_REQUIRED');
+  const installedAppId = configured;
   if (!installedAppId) return deny('APPLICATION_INSTALLATION_REQUIRED');
   if (!options.initial && (!claimed || !validEpoch(scope.launchAccessEpoch))) return deny('APPLICATION_SESSION_REAUTH_REQUIRED');
   const base = (process.env.ACCESSOPS_BASE_URL || process.env.ACCESSOPS_URL || '').trim().replace(/\/$/, '');
-  if (!base) return unavailable();
+  try { const url = new URL(base); if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') return unavailable(); } catch { return unavailable(); }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 3000);
   try {
-    const headers: Record<string,string> = {'content-type':'application/json',
-      'x-organization-id':organizationId,'x-user-id':personId,'x-platform-role':'USER'};
-    const requestId=randomUUID();
-    headers['x-request-id']=requestId;
-    const trust=process.env.GATEWAY_ACTOR_TRUST_SECRET?.trim();
-    if(trust) headers['x-gateway-actor-proof']=createHmac('sha256',trust).update(`${organizationId}\n${personId}\n${requestId}`).digest('hex');
-    let token=process.env.ACCESSOPS_SERVICE_TOKEN?.trim();
-    if(!token){
-      const pem=process.env.SERVICE_AUTH_PRIVATE_KEY_PEM?.trim();
-      const secret=process.env.SERVICE_AUTH_SECRET?.trim();
-      if(!pem && !secret)return unavailable();
-      const issuedAt=Math.floor(Date.now()/1000),kid=process.env.SERVICE_AUTH_KID || applicationKey;
-      const claims={serviceId:applicationKey,audience:'accessops-service',organizationId,
-        personId,installationId:installedAppId,applicationKey,scopes:['accessops.launch.evaluate'],issuedAt,expiresAt:issuedAt+30,kid,alg:pem?'EdDSA':'HS256'};
-      const payload=Buffer.from(JSON.stringify(claims)).toString('base64url');
-      if(pem){const header=Buffer.from(JSON.stringify({alg:'EdDSA',typ:'JWT',kid})).toString('base64url');
-        const data=`${header}.${payload}`;token=`${data}.${sign(null,Buffer.from(data),createPrivateKey(pem)).toString('base64url')}`;
-      }else token=`${payload}.${createHmac('sha256',secret!).update(payload).digest('base64url')}`;
-    }
-    headers.authorization=`Bearer ${token}`;
+    const pem=process.env.SERVICE_AUTH_PRIVATE_KEY_PEM?.trim();
+    const kid=process.env.SERVICE_AUTH_KID?.trim();
+    if (!pem || !kid) return unavailable();
+    const key=createPrivateKey(pem);
+    if (key.asymmetricKeyType !== 'ed25519') return unavailable();
+    const issuedAt=Math.floor(Date.now()/1000);
+    const claims={serviceId:applicationKey,audience:'accessops-service',organizationId,
+      personId,installationId:installedAppId,applicationKey,scopes:['accessops.launch.evaluate'],
+      issuedAt,expiresAt:issuedAt+30,kid,alg:'EdDSA'};
+    const header=Buffer.from(JSON.stringify({alg:'EdDSA',typ:'JWT',kid})).toString('base64url');
+    const payload=Buffer.from(JSON.stringify(claims)).toString('base64url');
+    const data=`${header}.${payload}`;
+    const token=`${data}.${sign(null,Buffer.from(data),key).toString('base64url')}`;
+    const headers={'content-type':'application/json',authorization:`Bearer ${token}`};
     const response = await (options.fetchImpl || fetch)(`${base}/api/v1/accessops/launch/product-evaluate`, {
-      method:'POST', headers, signal:controller.signal,
+      method:'POST', headers, signal:controller.signal, redirect:'error',
       body:JSON.stringify({organizationId,userId:personId,installedAppId,applicationKey,permission:'ACCESS',purpose:'PRODUCT_API'}),
     });
     if (!response.ok) return unavailable();
