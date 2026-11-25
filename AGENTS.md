@@ -26,3 +26,8 @@ qualification. Keep the verifier and returned subject on the server.
 Verify host transaction state and credentials before committing a session.
 Only explicitly opted-in confidential redemption can return a renewal
 capability. Persist the SDK renewal attempt marker with the credential CAS.
+
+Use the [Grid and Calendar session pilot guide](docs/grid-host-session-pilot.md)
+for local application integration. Preserve immutable edit IDs and committed
+receipts across recovery. Only reviewed, accepted foreground commands may
+report activity. Keep deployment and renewal flags off outside approved pilots.
