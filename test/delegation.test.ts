@@ -130,3 +130,190 @@ test('never sends tokens to unapproved origins or routes', async () => {
     .rejects.toMatchObject({ code: 'INVALID_RESOURCE_URL' });
   expect(status.tokenCalls).toBe(0);
 });
+
+async function renewalFixture() {
+  const { evidenceSession: one, expected, status, client, operations } = mockServices(sdk);
+  const initial = await one.validate('launch-credential', 'local-session', expected);
+  let current: Awaited<ReturnType<sdk.CredentialStore['load']>> = { revision: 'old', credentials: initial };
+  const store: sdk.CredentialStore = {
+    load: async () => current,
+    replaceIfCurrent: jest.fn(async (_id, expectedRevision, credentials) => {
+      if (!current || current.revision !== expectedRevision) return false;
+      current = { revision: 'new', credentials };
+      return true;
+    }),
+    removeIfCurrent: async (_id, expectedRevision) => {
+      if (!current || current.revision !== expectedRevision) return false;
+      current = undefined;
+      return true;
+    },
+  };
+  const states = { consume: jest.fn().mockResolvedValueOnce({ sessionId: initial.sessionId, revision: 'old', expected }) };
+  const complete = () => sdk.completeSourceRenewal(one, { code: 'one-code', state: 'one-state' }, states, store);
+  status.recovery = { duration: 1200, launchDuration: 300 };
+  return { one, expected, status, initial, store, complete, client, operations };
+}
+
+test('renews same central session using live AccessOps, then performs delegated Drive operation', async () => {
+  const { complete, initial, store, client, operations } = await renewalFixture();
+  const renewed = await complete();
+  expect(renewed.sourceEvidence?.centralSessionId).toBe(initial.sourceEvidence?.centralSessionId);
+  expect(renewed.expiresAt).toBeGreaterThan(initial.expiresAt);
+  expect(renewed.sourceEvidence?.launchTokenExpiresAt).toBeLessThan(renewed.expiresAt);
+  expect((await store.load(initial.sessionId))?.revision).toBe('new');
+  expect((await client.call(renewed, operations.drive, operations.drive.origin + '/files')).status).toBe(201);
+});
+
+test.each([
+  ['new central session', { sessionId: 'different-session' }, 'SOURCE_BINDING_CHANGED'],
+  ['same provenance', { reference: 'fixture-launch' }, 'SOURCE_RENEWAL_NOT_ADVANCED'],
+  ['same deadline', { duration: 600 }, 'SOURCE_RENEWAL_NOT_ADVANCED'],
+])('rejects renewal with %s', async (_case, patch, code) => {
+  const { complete, status, store } = await renewalFixture();
+  Object.assign(status.recovery, patch);
+  await expect(complete()).rejects.toMatchObject({ code });
+  expect(store.replaceIfCurrent).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['active', false, 'REAUTHENTICATE'],
+  ['allowed', false, 'ACCESS_DENIED'],
+  ['available', false, 'RETRY'],
+])('does not commit renewal when One reports %s=%s', async (field, value, nextAction) => {
+  const { complete, status, store } = await renewalFixture();
+  status[field] = value;
+  await expect(complete()).rejects.toMatchObject({ nextAction });
+  expect(store.replaceIfCurrent).not.toHaveBeenCalled();
+});
+
+test('host logout prevents a concurrent callback from restoring credentials', async () => {
+  const { complete, initial, store } = await renewalFixture();
+  const callback = complete();
+  await store.removeIfCurrent(initial.sessionId, 'old');
+  await expect(callback).rejects.toMatchObject({ code: 'SOURCE_SESSION_CHANGED' });
+  expect(await store.load(initial.sessionId)).toBeUndefined();
+});
+
+test('only one concurrent callback can finish a browser transaction', async () => {
+  const { complete, store } = await renewalFixture();
+  const callbacks = await Promise.allSettled([complete(), complete()]);
+  expect(callbacks.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+  expect(store.replaceIfCurrent).toHaveBeenCalledTimes(1);
+});
+
+test('proactively signals deadlines without sending background activity', async () => {
+  const { initial } = await renewalFixture();
+  expect(sdk.sourceRecoveryStatus(initial, 60_000, initial.expiresAt - 60_001)).toBe('ACTIVE');
+  expect(sdk.sourceRecoveryStatus(initial, 60_000, initial.expiresAt - 60_000)).toBe('RENEWAL_DUE');
+  expect(sdk.sourceRecoveryStatus(initial, 60_000, initial.expiresAt)).toBe('EXPIRED');
+  const url = new URL(sdk.oneResumeUrl({ portalOrigin: 'https://one.example', appSlug: 'cynayd-connect',
+    callbackUrl: 'https://connect.example/one-drive-return' }));
+  expect(url.pathname).toBe('/apps/resume');
+  expect(url.searchParams.get('returnUrl')).toBe('https://connect.example/one-drive-return');
+  expect(() => sdk.oneResumeUrl({ portalOrigin: 'https://one.example', appSlug: 'cynayd-connect',
+    callbackUrl: 'https://connect.example/one-drive-return?code=existing' })).toThrow();
+});
+
+test('simulates twelve hours with rotating source evidence and repeated target exchanges', async () => {
+  const clock = jest.spyOn(Date, 'now');
+  const base = Date.now();
+  clock.mockReturnValue(base);
+  try {
+    const { evidenceSession: one, expected, status, client, operations } = mockServices(sdk);
+    let current = { revision: '0', credentials: await one.validate('launch-credential', 'local', expected) };
+    const store: sdk.CredentialStore = {
+      load: async () => current,
+      replaceIfCurrent: async (_id, revision, credentials) => {
+        if (revision !== current.revision) return false;
+        current = { revision: String(Number(revision) + 1), credentials };
+        return true;
+      },
+      removeIfCurrent: async () => false,
+    };
+    for (let minute = 5; minute <= 720; minute += 5) {
+      clock.mockReturnValue(base + minute * 60_000);
+      if (minute % 10 === 0) {
+        expect(sdk.sourceRecoveryStatus(current.credentials)).toBe('EXPIRED');
+        status.recovery = { code: 'code-' + minute, reference: 'launch-' + minute, duration: (minute + 10) * 60 };
+        await sdk.completeSourceRenewal(one, { code: status.recovery.code, state: 'fixture-state' }, {
+          consume: async () => ({ sessionId: 'local', revision: current.revision, expected }),
+        }, store);
+      }
+      const operation = minute % 10 === 0 ? operations.drive : operations.calendar;
+      const path = operation === operations.drive ? '/files' : '/events';
+      expect((await client.call(current.credentials, operation, operation.origin + path)).status).toBe(201);
+      if ([60, 240, 480, 720].includes(minute)) {
+        expect(current.revision).toBe(String(minute / 10));
+        expect(status.tokenCalls).toBe(minute / 5);
+      }
+    }
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+test('validates a session without exchanging a target token and preserves lock recovery', async () => {
+  const { client, binding, status } = await fixture();
+  expect(await client.sessionStatus(binding)).toMatchObject({
+    state: 'ACTIVE', accessEpoch: binding.accessEpoch, revision: 'fixture-revision',
+  });
+  expect(status.tokenCalls).toBe(0);
+  status.locked = true;
+  await expect(client.sessionStatus(binding)).rejects.toMatchObject({ code: 'session_locked', nextAction: 'UNLOCK' });
+});
+
+test('direct backend enforcement refuses to execute the application operation while locked', async () => {
+  const { client, binding, status } = await fixture();
+  const operation = jest.fn(async () => 'authorized');
+  status.locked = true;
+  await expect(sdk.withCentralSession(client, binding, operation)).rejects.toMatchObject({ nextAction: 'UNLOCK' });
+  expect(operation).not.toHaveBeenCalled();
+  status.locked = false;
+  await expect(sdk.withCentralSession(client, binding, operation)).resolves.toBe('authorized');
+});
+
+test('two event relay subscribers share one status request and treat lock and logout as hints', async () => {
+  const { client, binding, status } = await fixture();
+  status.locked = true;
+  const wrapped = { sessionStatus: jest.fn((session: sdk.VerifiedSession) => client.sessionStatus(session)) };
+  const monitor = new sdk.SessionEventMonitor(wrapped);
+  const notifications: sdk.SessionEvent[][] = [[], []];
+  let lockSeen!: () => void;
+  const locked = new Promise<void>(resolve => { lockSeen = resolve; });
+  const close = monitor.subscribe('host-operation-session', async () => binding, event => notifications[0].push(event));
+  const closeOther = monitor.subscribe('host-operation-session', async () => binding, event => {
+    notifications[1].push(event);
+    if (event.type === 'SESSION_LOCKED') lockSeen();
+  });
+  await locked;
+  expect(wrapped.sessionStatus).toHaveBeenCalledTimes(1);
+  monitor.logout('host-operation-session');
+  expect(notifications.map(events => events.map(event => event.type))).toEqual([
+    ['SESSION_LOCKED', 'SESSION_LOGOUT'], ['SESSION_LOCKED', 'SESSION_LOGOUT'],
+  ]);
+  expect(sdk.encodeSessionEvent(notifications[0][0])).toBe('event: session\ndata: {"type":"SESSION_LOCKED"}\n\n');
+  close();
+  closeOther();
+});
+
+test('reports qualified activity through confidential client auth and preserves duplicate semantics', async () => {
+  const { client, binding, status } = await fixture();
+  const event = randomUUID();
+  await expect(client.reportActivity(binding, 'message.send', event)).resolves.toEqual({ accepted: true, updated: true });
+  await expect(client.reportActivity(binding, 'message.send', event)).resolves.toEqual({ accepted: true, updated: false });
+  await expect(client.reportActivity(binding, 'message.send', 'short')).rejects.toMatchObject({ code: 'INVALID_ACTIVITY_EVENT' });
+  status.locked = true;
+  await expect(client.reportActivity(binding, 'message.send', randomUUID())).rejects.toMatchObject({ nextAction: 'UNLOCK' });
+});
+
+test('reports whether One advanced authentication idle time on its qualified path', async () => {
+  const { client, binding, status } = await fixture();
+  status.authenticationIdle = true;
+  const event = randomUUID();
+  await expect(client.reportActivity(binding, 'message.send', event)).resolves.toEqual({
+    accepted: true, updated: true, authenticationIdleUpdated: true,
+  });
+  await expect(client.reportActivity(binding, 'message.send', event)).resolves.toEqual({
+    accepted: true, updated: false, authenticationIdleUpdated: false,
+  });
+});

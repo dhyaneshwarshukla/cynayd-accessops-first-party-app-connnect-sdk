@@ -46,7 +46,8 @@
       "checkoutStatus": "Calendar integration test retained in the host application; it depends on Calendar middleware and is not part of the helper-only SDK test target."
     }
   ],
-  "sdkVersion": "0.2.0",
+  "sdkVersion": "0.6.0-rc.0",
+  "unifiedSessionCandidate": "docs/unified-session-v3.md",
   "delegation": {
     "upstream": "cynayd-AccessOps/standalone-backend/src/delegation",
     "sourceVersion": "d4b43f5",

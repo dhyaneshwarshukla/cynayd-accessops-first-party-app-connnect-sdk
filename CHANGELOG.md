@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.6.0-rc.0
+
+- Surface One's optional qualified authentication-idle update result while
+  retaining the v0.5 response shape for legacy servers.
+- Document the Go-authoritative pilot, application adapters, and the pending
+  security review for backend-only source renewal.
+
+
+## 0.5.0
+
+- Adds authenticated, allowlisted activity reports and direct-operation session enforcement.
+- Adds application SSE relay support with coalesced, passive session monitoring.
+- Keeps verified browser source renewal and existing delegation behavior.
+
+## 0.4.0
+
+- Adds private, passive One session status with deadlines and structured lock recovery.
+- Adds a browser-only session invalidation observer for same-origin coordination.
+- Preserves verified browser renewal and existing delegation APIs.
+
+## 0.3.0
+
+- Adds One browser resume helpers, verified same-session credential replacement and proactive expiry status.
+- Exposes launch, portal binding, delegation subject and source API token deadlines separately.
+- Keeps existing launch defaults and target exchange interfaces compatible.
+
 ## 0.2.0
 
 - Adds verified One launch/session binding, delegation exchange, private key JWT, DPoP, live introspection and resource integration.

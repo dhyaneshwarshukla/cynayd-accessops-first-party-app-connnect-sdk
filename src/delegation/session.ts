@@ -9,6 +9,15 @@ export interface SessionIdentity {
   installedAppId: string;
 }
 
+export interface SourceEvidence {
+  centralSessionId: string;
+  launchReference: string;
+  launchTokenExpiresAt: number;
+  portalBindingExpiresAt: number;
+  subjectExpiresAt: number;
+  apiTokenExpiresAt: number;
+}
+
 export interface VerifiedSession extends SessionIdentity {
   sessionId: string;
   appSlug: string;
@@ -16,6 +25,7 @@ export interface VerifiedSession extends SessionIdentity {
   subject: string;
   apiToken: string;
   expiresAt: number;
+  sourceEvidence?: SourceEvidence;
 }
 
 /** Use protected server-side storage. Writes and invalidation must use the host session revision. */
@@ -43,6 +53,8 @@ export interface OneSessionOptions extends Transport {
   /** Resolve from One's configured, trusted JWKS. Unknown KID returns null. */
   signingKey(kid: string): Promise<KeyObject | string | null>;
   delegation: DelegationClient;
+  /** Use the stored evidence deadlines after completing a verified One code launch. */
+  useEvidenceDeadlines?: boolean;
 }
 
 function reauthenticate(requestId: string, code = 'SOURCE_BINDING_INVALID'): never {
@@ -143,14 +155,24 @@ export class OneApplicationSession {
       reauthenticate(requestId);
     }
     const info = object(result.sessionInfo);
-    const expiresAt = Math.min(claims.exp! * 1000, claims.sessionBinding.expiresAt * 1000,
-      timestamp(info.delegationSourceSessionExpiresAt), timestamp(info.delegationCredentialExpiresAt),
-      timestamp(info.apiTokenExpiresAt), timestamp(info.expiresAt));
-    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() || info.delegationRenewalMode !== 'INTERACTIVE_RECONNECT') {
+    const sourceEvidence = {
+      centralSessionId: claims.sessionBinding.sessionId,
+      launchReference: claims.sessionBinding.reference,
+      launchTokenExpiresAt: timestamp(info.expiresAt),
+      portalBindingExpiresAt: Math.min(claims.sessionBinding.expiresAt * 1000, timestamp(info.delegationSourceSessionExpiresAt)),
+      subjectExpiresAt: claims.exp! * 1000,
+      apiTokenExpiresAt: timestamp(info.apiTokenExpiresAt),
+    };
+    const evidenceExpiresAt = Math.min(sourceEvidence.subjectExpiresAt, sourceEvidence.portalBindingExpiresAt,
+      sourceEvidence.apiTokenExpiresAt, timestamp(info.delegationCredentialExpiresAt));
+    const expiresAt = this.options.useEvidenceDeadlines ? evidenceExpiresAt :
+      Math.min(evidenceExpiresAt, sourceEvidence.launchTokenExpiresAt);
+    if (!Number.isFinite(expiresAt) || !Number.isFinite(sourceEvidence.launchTokenExpiresAt) ||
+        expiresAt <= Date.now() || info.delegationRenewalMode !== 'INTERACTIVE_RECONNECT') {
       reauthenticate(requestId, 'SOURCE_SESSION_EXPIRED');
     }
     return { ...expected, sessionId, appSlug: this.options.appSlug, accessEpoch: claims.launchAccessEpoch,
-      subject, apiToken: result.apiToken, expiresAt };
+      subject, apiToken: result.apiToken, expiresAt, sourceEvidence };
   }
 
   /** Recheck source access through the same canonical AccessOps pipeline used by the exchange. */

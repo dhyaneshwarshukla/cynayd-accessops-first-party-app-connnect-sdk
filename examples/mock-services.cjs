@@ -14,10 +14,12 @@ function mockServices(sdk) {
     tokenEndpoint: one + '/api/v1/delegations/token',
     introspectionEndpoint: one + '/api/v1/delegations/introspect',
     launchEvaluationEndpoint: one + '/api/v1/delegations/launch-evaluate',
+    sessionStatusEndpoint: one + '/api/v1/delegations/session-status',
+    activityEndpoint: one + '/api/v1/delegations/activity',
   };
   const expected = { userId: 'person-test', organizationId: 'tenant-test', installedAppId: 'connect-install-test' };
   const status = { active: true, allowed: true, acl: true, available: true, replayAvailable: true, expires: false,
-    expiredTarget: false, wrongTargetAudience: false, wrongScope: false, tokenCalls: 0, proofs: [], resourceError: 0 };
+    expiredTarget: false, wrongTargetAudience: false, wrongScope: false, tokenCalls: 0, proofs: [], resourceError: 0, recovery: null, locked: false };
   const operations = {
     drive: { audience: 'drive-fixture', scopes: ['drive:write'], method: 'POST', origin: drive, allowsUrl: u => u.pathname === '/files' },
     calendar: { audience: 'calendar-fixture', scopes: ['calendar:write'], method: 'POST', origin: calendar,
@@ -30,12 +32,15 @@ function mockServices(sdk) {
   const sign = (claims, audience, expiresIn) => jwt.sign(claims, privateKey, {
     algorithm: 'RS256', keyid: 'fixture-key', header: { alg: 'RS256', typ: 'at+jwt' }, issuer, audience, expiresIn,
   });
-  const subject = sign({ type: 'one_delegation_subject', sub: expected.userId, id: expected.userId,
+  const makeSubject = (reference, centralSessionId, expiry) => sign({ type: 'one_delegation_subject', sub: expected.userId, id: expected.userId,
     organizationId: expected.organizationId, appSlug: 'cynayd-connect', installedAppId: expected.installedAppId,
-    launchAccessEpoch: 5, launchJti: 'fixture-launch',
-    sessionBinding: { reference: 'fixture-launch', sessionId: 'one-session', originalIat: start, expiresAt: start + 600 },
-  }, 'cynayd-connect', 600);
-  let codeRedeemed = false;
+    launchAccessEpoch: 5, launchJti: reference,
+    sessionBinding: { reference, sessionId: centralSessionId, originalIat: start, expiresAt: expiry },
+  }, 'cynayd-connect', expiry - Math.floor(Date.now() / 1000));
+  const subject = makeSubject('fixture-launch', 'one-session', start + 600);
+  const subjects = new Set([subject]);
+  const redeemedCodes = new Set();
+  const activityEvents = new Set();
 
   function proofIsValid(proof, method, url, token, thumbprint) {
     const head = jwt.decode(proof, { complete: true })?.header;
@@ -55,8 +60,11 @@ function mockServices(sdk) {
       status: code, headers: { 'X-Request-Id': headers.get('X-Request-Id'), 'Content-Type': 'application/json', ...extra },
     });
     if (url === one + '/api/sso/redeem-code') {
-      if (codeRedeemed || JSON.parse(init.body).code !== 'one-code') return response({ code: 'LAUNCH_INVALID' }, 401);
-      codeRedeemed = true;
+      const code = JSON.parse(init.body).code;
+      if (redeemedCodes.has(code) || code !== (status.recovery?.code ?? 'one-code')) {
+        return response({ code: 'LAUNCH_INVALID' }, 401);
+      }
+      redeemedCodes.add(code);
       return response({ success: true, ssoToken: 'launch-credential' });
     }
     if (url === one + '/api/sso/validate') {
@@ -66,9 +74,14 @@ function mockServices(sdk) {
       }
       if (status.expires) return response({ code: 'TOKEN_EXPIRED' }, 401);
       if (body.appSlug !== 'cynayd-connect' || body.includeDelegationSubject !== true) return response({ error: 'invalid_request' }, 400);
-      const expiry = new Date((start + 600) * 1000).toISOString();
-      return response({ valid: true, apiToken: 'source-api', delegationSubjectToken: subject,
-        sessionInfo: { expiresAt: expiry, apiTokenExpiresAt: expiry, delegationSourceSessionExpiresAt: expiry,
+      const recovery = status.recovery;
+      const deadline = start + (recovery?.duration ?? 600);
+      const expiry = new Date(deadline * 1000).toISOString();
+      const launchExpiry = new Date((start + (recovery?.launchDuration ?? 600)) * 1000).toISOString();
+      const newSubject = recovery ? makeSubject(recovery.reference ?? 'renewed-launch', recovery.sessionId ?? 'one-session', deadline) : subject;
+      subjects.add(newSubject);
+      return response({ valid: true, apiToken: 'source-api', delegationSubjectToken: newSubject,
+        sessionInfo: { expiresAt: launchExpiry, apiTokenExpiresAt: expiry, delegationSourceSessionExpiresAt: expiry,
           delegationCredentialExpiresAt: expiry, delegationRenewalMode: 'INTERACTIVE_RECONNECT' } });
     }
     if (Object.values(endpoints).includes(url)) {
@@ -88,8 +101,23 @@ function mockServices(sdk) {
         }
         return response({ ...token, active: true });
       }
-      if (!status.active || body.get('subject_token') !== subject || id !== 'connect-fixture') return response({ error: 'invalid_grant' }, 400);
+      if (!status.active || !subjects.has(body.get('subject_token')) || id !== 'connect-fixture') return response({ error: 'invalid_grant' }, 400);
       if (!status.allowed) return response({ error: 'access_denied' }, 403);
+      if (status.locked) return response({ error: 'session_locked' }, 403);
+      if (url === endpoints.activityEndpoint) {
+        if (body.get('operation') !== 'message.send') return response({ error: 'activity_not_eligible' }, 403);
+        const id = body.get('event_id');
+        const updated = !activityEvents.has(id);
+        activityEvents.add(id);
+        return response({ accepted: true, updated, ...(status.authenticationIdle ? { authenticationIdleUpdated: updated } : {}) });
+      }
+      if (url === endpoints.sessionStatusEndpoint) {
+        const now = Date.now();
+        return response({ state: 'ACTIVE', reason: 'SESSION_VALID', nextAction: 'NONE', accessEpoch: 5,
+          centralExpiresAt: new Date(now + 600_000).toISOString(), subjectExpiresAt: new Date(now + 60_000).toISOString(),
+          idleExpiresAt: new Date(now + 300_000).toISOString(), lastActivityAt: new Date(now - 24_000).toISOString(),
+          revision: 'fixture-revision' });
+      }
       if (url === endpoints.launchEvaluationEndpoint) {
         return response({ decision: 'ALLOW', availability: 'AVAILABLE', applicationKey: 'cynayd-connect', ...expected, launchAccessEpoch: 5 });
       }
@@ -149,7 +177,9 @@ function mockServices(sdk) {
   }
   const session = new sdk.OneApplicationSession({ issuer, identityOrigin: one, appSlug: 'cynayd-connect',
     signingKey, delegation: client, fetch: fetchMock });
-  return { session, expected, client, operations, status };
+  return { session, expected, client, operations, status,
+    evidenceSession: new sdk.OneApplicationSession({ issuer, identityOrigin: one, appSlug: 'cynayd-connect',
+      signingKey, delegation: client, fetch: fetchMock, useEvidenceDeadlines: true }) };
 }
 
 module.exports = { mockServices };

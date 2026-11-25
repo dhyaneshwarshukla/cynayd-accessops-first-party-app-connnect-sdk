@@ -139,3 +139,10 @@ Run `npm ci`, `npm run typecheck`, `npm test` and `npm run example` in the sourc
 - [Drive route compatibility and target evidence](docs/phase2/drive-compatibility.md)
 - [Connect implementation handoff and authenticated acceptance matrix](docs/phase2/connect-agent.md)
 - [Private registry distribution and release controls](docs/phase2/distribution.md)
+
+See the [session renewal contract](docs/session-renewal-v1.md) for the v0.3.0 browser resume flow and migration requirements.
+
+See [unified session v2](docs/unified-session-v2.md) for v0.5.0 activity reporting, direct-backend enforcement and event relay integration.
+
+The [v0.6 candidate contract](docs/unified-session-v3.md) covers the opt-in
+Go-authoritative authentication activity path and staging acceptance.

@@ -19,6 +19,23 @@ export interface DelegationClientOptions extends Transport {
   tokenEndpoint: string;
   introspectionEndpoint: string;
   launchEvaluationEndpoint: string;
+  sessionStatusEndpoint?: string;
+  activityEndpoint?: string;
+}
+
+export type ActivityOperation = 'message.send' | 'document.edit' | 'presentation.edit' | 'spreadsheet.edit' |
+  'mail.compose' | 'mail.send' | 'file.interact' | 'record.edit';
+
+export interface CentralSessionStatus {
+  state: 'ACTIVE';
+  reason: 'SESSION_VALID';
+  nextAction: 'NONE';
+  revision: string | null;
+  accessEpoch: number;
+  centralExpiresAt: string;
+  subjectExpiresAt: string;
+  lastActivityAt: string | null;
+  idleExpiresAt: string | null;
 }
 
 interface TargetToken { value: string; expiresAt: number }
@@ -28,7 +45,9 @@ export class DelegationClient {
   private readonly options: DelegationClientOptions;
 
   constructor(options: DelegationClientOptions) {
-    const endpoints = [options.tokenEndpoint, options.introspectionEndpoint, options.launchEvaluationEndpoint].map(httpsUrl);
+    const endpoints = [options.tokenEndpoint, options.introspectionEndpoint, options.launchEvaluationEndpoint,
+      options.sessionStatusEndpoint ?? options.launchEvaluationEndpoint,
+      options.activityEndpoint ?? options.launchEvaluationEndpoint].map(httpsUrl);
     if (endpoints.some(url => url.search || url.origin !== endpoints[0].origin)) {
       throw new Error('One endpoints must have a common trusted origin and no query');
     }
@@ -51,6 +70,52 @@ export class DelegationClient {
     return this.form(this.options.launchEvaluationEndpoint, {
       subject_token: subject, subject_token_type: ACCESS_TOKEN_TYPE,
     }, correlation(requestId));
+  }
+
+  /** One read-only, confidential status request. Keep the verified subject server-side. */
+  async sessionStatus(binding: VerifiedSession, suppliedRequestId?: string): Promise<CentralSessionStatus> {
+    const requestId = correlation(suppliedRequestId);
+    const endpoint = this.options.sessionStatusEndpoint;
+    if (!endpoint) throw new FirstPartyAuthError(503, 'SESSION_STATUS_NOT_CONFIGURED', requestId, 'INVESTIGATE');
+    if (!binding.subject) throw new FirstPartyAuthError(401, 'SOURCE_BINDING_INVALID', requestId, 'REAUTHENTICATE');
+    const result = await this.form(endpoint, {
+      subject_token: binding.subject, subject_token_type: ACCESS_TOKEN_TYPE,
+    }, requestId);
+    if (result.state !== 'ACTIVE' || result.reason !== 'SESSION_VALID' || result.nextAction !== 'NONE' ||
+        result.accessEpoch !== binding.accessEpoch ||
+        (result.revision !== null && (typeof result.revision !== 'string' || !result.revision)) ||
+        (result.lastActivityAt !== null && (typeof result.lastActivityAt !== 'string' || !Number.isFinite(Date.parse(result.lastActivityAt)))) ||
+        (result.idleExpiresAt !== null && (typeof result.idleExpiresAt !== 'string' || !Number.isFinite(Date.parse(result.idleExpiresAt)))) ||
+        typeof result.centralExpiresAt !== 'string' || typeof result.subjectExpiresAt !== 'string' ||
+        !(Date.parse(result.centralExpiresAt) > Date.now()) || !(Date.parse(result.subjectExpiresAt) > Date.now())) {
+      throw new FirstPartyAuthError(503, 'UPSTREAM_PROFILE_MISMATCH', requestId, 'INVESTIGATE');
+    }
+    return { state: 'ACTIVE', reason: 'SESSION_VALID', nextAction: 'NONE', revision: result.revision,
+      accessEpoch: binding.accessEpoch, centralExpiresAt: result.centralExpiresAt, subjectExpiresAt: result.subjectExpiresAt,
+      lastActivityAt: result.lastActivityAt, idleExpiresAt: result.idleExpiresAt };
+  }
+
+  /** Use only after a policy-qualified interactive command has been accepted by the application backend. */
+  async reportActivity(binding: VerifiedSession, operation: ActivityOperation, eventId: string, suppliedRequestId?: string) {
+    const requestId = correlation(suppliedRequestId);
+    const endpoint = this.options.activityEndpoint;
+    if (!endpoint) throw new FirstPartyAuthError(503, 'ACTIVITY_NOT_CONFIGURED', requestId, 'INVESTIGATE');
+    if (!binding.subject || binding.expiresAt <= Date.now()) {
+      throw new FirstPartyAuthError(401, 'SOURCE_SESSION_EXPIRED', requestId, 'REAUTHENTICATE');
+    }
+    if (!/^[A-Za-z0-9_-]{16,128}$/.test(eventId)) {
+      throw new FirstPartyAuthError(400, 'INVALID_ACTIVITY_EVENT', requestId, 'INVESTIGATE');
+    }
+    const result = await this.form(endpoint, {
+      subject_token: binding.subject, subject_token_type: ACCESS_TOKEN_TYPE, operation, event_id: eventId,
+    }, requestId);
+    if (result.accepted !== true || typeof result.updated !== 'boolean' ||
+        (result.authenticationIdleUpdated !== undefined &&
+          (typeof result.authenticationIdleUpdated !== 'boolean' || (result.authenticationIdleUpdated && !result.updated)))) {
+      throw new FirstPartyAuthError(503, 'UPSTREAM_PROFILE_MISMATCH', requestId, 'INVESTIGATE');
+    }
+    return { accepted: true as const, updated: result.updated,
+      ...(result.authenticationIdleUpdated !== undefined ? { authenticationIdleUpdated: result.authenticationIdleUpdated } : {}) };
   }
 
   introspect(token: string, audience: string, requestId?: string) {
