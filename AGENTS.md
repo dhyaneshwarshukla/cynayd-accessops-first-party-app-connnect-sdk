@@ -20,3 +20,8 @@ authentication activity. Product adapters must report an accepted authorized
 business command, never a browser heartbeat or autosave. Backend source
 renewal requires a reviewed One protocol. Keep verified browser resume until
 that protocol is implemented and qualified.
+
+Use the [bound launch contract](docs/bound-launch-v1.md) only for staging
+qualification. Keep the verifier and returned subject on the server.
+Verify host transaction state and credentials before committing a session.
+A bound launch does not provide a silent renewal capability.

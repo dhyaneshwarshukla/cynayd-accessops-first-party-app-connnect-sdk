@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0-rc.1
+
+- Add server-only confidential bound-launch initiation and redemption.
+- Document the pilot flow, rollout gates and TOTP version prerequisite.
+- Silent source renewal remains outside this candidate.
+
+
 ## 0.6.0-rc.0
 
 - Surface One's optional qualified authentication-idle update result while

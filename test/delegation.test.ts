@@ -317,3 +317,15 @@ test('reports whether One advanced authentication idle time on its qualified pat
     accepted: true, updated: false, authenticationIdleUpdated: false,
   });
 });
+
+test('initiates bound launch with a server-held verifier and redeems only after state matches', async () => {
+  const { client } = await fixture();
+  const pending = await client.initiateBoundLaunch('https://connect.example.test/return');
+  expect(pending.expiresIn).toBe(120);
+  const input = { ...pending, expectedState: pending.state, code: 'fixture-code' };
+  await expect(client.redeemBoundLaunch({ ...input, state: 'mismatched' })).rejects.toMatchObject({
+    code: 'SOURCE_BINDING_INVALID',
+  });
+  await expect(client.redeemBoundLaunch(input)).resolves.toMatchObject({ subject: expect.any(String) });
+  await expect(client.redeemBoundLaunch(input)).rejects.toMatchObject({ code: 'invalid_grant' });
+});

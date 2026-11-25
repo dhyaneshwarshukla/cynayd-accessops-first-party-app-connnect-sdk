@@ -1,5 +1,5 @@
 /* In-process qualification fixtures only. These URLs are intercepted by mock fetch. */
-const { createHash, generateKeyPairSync, randomUUID } = require('node:crypto');
+const { createHash, generateKeyPairSync, randomBytes, randomUUID } = require('node:crypto');
 const jwt = require('jsonwebtoken');
 
 const one = 'https://one.example.test';
@@ -16,6 +16,8 @@ function mockServices(sdk) {
     launchEvaluationEndpoint: one + '/api/v1/delegations/launch-evaluate',
     sessionStatusEndpoint: one + '/api/v1/delegations/session-status',
     activityEndpoint: one + '/api/v1/delegations/activity',
+    boundLaunchInitiationEndpoint: one + '/api/v1/delegations/bound-launch-initiate',
+    boundLaunchRedemptionEndpoint: one + '/api/v1/delegations/bound-launch-redeem',
   };
   const expected = { userId: 'person-test', organizationId: 'tenant-test', installedAppId: 'connect-install-test' };
   const status = { active: true, allowed: true, acl: true, available: true, replayAvailable: true, expires: false,
@@ -41,6 +43,7 @@ function mockServices(sdk) {
   const subjects = new Set([subject]);
   const redeemedCodes = new Set();
   const activityEvents = new Set();
+  const boundLaunches = new Map();
 
   function proofIsValid(proof, method, url, token, thumbprint) {
     const head = jwt.decode(proof, { complete: true })?.header;
@@ -100,6 +103,19 @@ function mockServices(sdk) {
           return response({ active: false });
         }
         return response({ ...token, active: true });
+      }
+      if (url === endpoints.boundLaunchInitiationEndpoint) {
+        const request = randomBytes(32).toString('base64url');
+        boundLaunches.set(request, body.get('challenge'));
+        return response({ request, expires_in: 120 });
+      }
+      if (url === endpoints.boundLaunchRedemptionEndpoint) {
+        const request = body.get('request');
+        const expected = boundLaunches.get(request);
+        const challenge = createHash('sha256').update(body.get('verifier')).digest('base64url');
+        if (expected !== challenge) return response({ error: 'invalid_grant' }, 400);
+        boundLaunches.delete(request);
+        return response({ subject_token: subject });
       }
       if (!status.active || !subjects.has(body.get('subject_token')) || id !== 'connect-fixture') return response({ error: 'invalid_grant' }, 400);
       if (!status.allowed) return response({ error: 'access_denied' }, 403);
