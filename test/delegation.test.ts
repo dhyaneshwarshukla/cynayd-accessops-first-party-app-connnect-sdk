@@ -329,3 +329,17 @@ test('initiates bound launch with a server-held verifier and redeems only after 
   await expect(client.redeemBoundLaunch(input)).resolves.toMatchObject({ subject: expect.any(String) });
   await expect(client.redeemBoundLaunch(input)).rejects.toMatchObject({ code: 'invalid_grant' });
 });
+
+test('bound callback cannot replace evidence after host logout or mismatched revision', async () => {
+  const { client, session, expected } = await fixture();
+  const pending = await client.initiateBoundLaunch('https://connect.example.test/return');
+  const states = { consume: jest.fn().mockResolvedValue({
+    ...pending, expected, sessionId: 'host-session', revision: 'before-logout',
+    centralSessionId: 'one-session', accessEpoch: 5,
+  }) };
+  const store = { replaceIfCurrent: jest.fn().mockResolvedValue(false) };
+  await expect(session.completeBoundLaunch({
+    request: pending.request, state: pending.state, code: pending.request,
+  }, states, store)).rejects.toMatchObject({ code: 'SOURCE_SESSION_CHANGED' });
+  expect(store.replaceIfCurrent).toHaveBeenCalledWith('host-session', 'before-logout', expect.any(Object));
+});

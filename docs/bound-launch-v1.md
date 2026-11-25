@@ -1,6 +1,6 @@
 # Bound application launch candidate
 
-SDK 0.6.0-rc.1 adds server-only initiation and redemption helpers.
+SDK 0.6.0-rc.2 adds host callback completion to the server-only initiation and redemption helpers.
 This candidate issues a delegation subject using the existing One launch
 deadline. It includes no renewal capability or source-renewal endpoint.
 
@@ -14,19 +14,20 @@ assertion keys, DPoP, client rate limits and AccessOps authorization.
    stores request, verifier, state, and expiry in a server-side, one-time
    transaction bound to the browser and host session revision. Only the
    opaque request goes to the One portal.
-2. The browser, on the trusted One portal, authorizes the request with
-   POST /api/sso/bound-launch-authorize and JSON {request}. The browser
-   uses a verified One access cookie and the One CSRF header. The portal
-   must present the intended application and obtain explicit user intent.
-   The response contains code, callback, and state. The portal sends only
-   the request, code, and state to that exact callback. Do not log these
-   values or put them in analytics. Portal UI wiring remains outstanding.
-3. The host consumes the application transaction and compares request,
-   returned state, original browser binding and current host revision
-   before redeemBoundLaunch. Keep the result on the server. The host must
-   verify the subject through One and check the expected person, tenant,
-   installation and session before committing a host session. Never use
-   this subject as application session authentication by itself.
+2. Send only the opaque request to the trusted One portal at
+   /apps/bound-launch?request=.... The page previews the registered application
+   and callback and asks the user to continue. The cookie-authenticated CSRF
+   protected POST to /api/sso/bound-launch-authorize first accepts
+   {request, intent: "preview"} and binds the request to that One session.
+   Only explicit confirmation submits {request, intent: "approve"}.
+   The portal sends request, code and state to the exact configured callback.
+   Exclude callback query values from access logs and analytics.
+3. The host adapter calls OneApplicationSession.completeBoundLaunch with
+   a store that atomically consumes the initiating browser's state. The SDK
+   verifies the subject signature and app, person, tenant, installation,
+   original One session and epoch, then applies the host credential revision
+   compare-and-set. Store only on the backend. This operation attaches
+   delegation evidence to an existing authenticated host session.
 4. A timeout or uncertain redemption starts a new verified launch. A
    consumed code cannot return a second subject.
 
@@ -76,3 +77,31 @@ review these decisions and the issuance transaction before activation.
 The administrative reset routes also require the existing step-up
 middleware with the admin.users.reset_password scope. Go-authoritative
 tenants need that exact scope in their approved policy for the operation.
+
+## Continuing assurance pilot controls
+
+Migration 0206 versions the authoritative password hash and exposes a
+restricted database function that locks both the password and TOTP generations.
+The dedicated Go password routes sign the generation paired with the exact
+verified hash. Go pins versioned password and TOTP receipts at initial grant
+consumption and during the source-assurance transaction.
+
+The Go test policy has an optional continuingSourceAssurance with
+maximumAgeMinutes (1–480) and allowedSources (exact clientId and installationId
+pairs). It requires an application_source_renewal session check and explicit
+session lifetime policy. The process switch
+ONE_CONTINUING_SOURCE_ASSURANCE_ENABLED defaults to disabled. The internal
+decision also requires the current unlocked One revision and an eligible
+ordinary Go session. The pilot reuses low-risk, verified password plus TOTP
+assurance from original grant consumption. Its deadline is the earliest of age
+from original verification, current authentication idle and absolute expiry.
+It changes neither receipt expiry nor session activity.
+
+Passkeys, mobile approval, email, and recovery evidence cannot contribute to
+this pilot. They retain existing sign-in behavior. Legacy, Go SHADOW, Orbit
+and SAML are outside the continuing pilot. No product endpoint invokes this
+mode to issue credentials yet. Before issuance, independently review current
+risk and required step-up handling, lazy idle lock and central logout
+serialization, atomic capability rotation and credential-generation invalidation
+of previously issued renewed subjects. AccessOps remains a separate live
+authorization boundary.

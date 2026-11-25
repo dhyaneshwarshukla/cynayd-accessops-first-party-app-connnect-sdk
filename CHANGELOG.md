@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0-rc.2
+
+- Validate the bound launch callback and write delegation evidence through the
+  authenticated host session's revision compare-and-set.
+- Document the One portal confirmation flow and continuing assurance pilot
+  prerequisites. This candidate does not issue silent renewal credentials.
+
+
 ## 0.6.0-rc.1
 
 - Add server-only confidential bound-launch initiation and redemption.
