@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0-rc.4
+
+- Claim each renewal generation durably before sending it to One. Response loss,
+  process exit and overlapping leases cannot trigger another send of that generation.
+
 ## 0.6.0-rc.3
 
 - Add disabled-by-default confidential source renewal and protected host

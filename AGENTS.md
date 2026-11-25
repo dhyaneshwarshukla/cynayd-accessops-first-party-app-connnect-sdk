@@ -18,10 +18,11 @@ Use the [v0.5.0 activity, lock and relay contract](docs/unified-session-v2.md). 
 Use the [v0.6 candidate contract](docs/unified-session-v3.md) for qualified
 authentication activity. Product adapters must report an accepted authorized
 business command, never a browser heartbeat or autosave. Backend source
-renewal requires a reviewed One protocol. Keep verified browser resume until
-that protocol is implemented and qualified.
+renewal requires independent review and authenticated pilot acceptance. Keep
+verified browser resume for unsupported modes and ambiguous renewal.
 
 Use the [bound launch contract](docs/bound-launch-v1.md) only for staging
 qualification. Keep the verifier and returned subject on the server.
 Verify host transaction state and credentials before committing a session.
-A bound launch does not provide a silent renewal capability.
+Only explicitly opted-in confidential redemption can return a renewal
+capability. Persist the SDK renewal attempt marker with the credential CAS.

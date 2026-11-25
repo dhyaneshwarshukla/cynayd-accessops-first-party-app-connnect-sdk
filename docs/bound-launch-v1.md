@@ -134,8 +134,13 @@ RenewableDelegationStore and cross-instance SourceRenewalCoordinator. The host
 must keep a durable host revision, invalidate it on logout, and atomically
 advance it with each replacement. Configure a bounded exclusive lease and a
 bounded upstream transport deadline. No active lease means reload newer stored
-evidence or report renewal in progress. An uncertain response requires verified
-browser recovery. The SDK never retries the old capability. Keep this
+evidence or report renewal in progress. Before sending a renewal, the SDK removes the old capability from storage and
+atomically persists a one-time attempt marker with a new host revision.
+The successor replaces that marker only at the claimed revision. Store the
+marker across replicas and restarts. If the claim succeeds but a response or
+store update is uncertain, or the process exits before the request, recover
+through verified browser launch. This conservative recovery also applies if
+One refuses the claimed attempt and interaction is required. Keep this
 credential recovery separate from any business-operation retry.
 
 Renewed subjects remain limited to the same sender. Live validation rechecks

@@ -1,4 +1,4 @@
-import { KeyObject } from 'node:crypto';
+import { KeyObject, randomUUID } from 'node:crypto';
 import { decodeHeader, SubjectClaims, verifyJwt } from './profile';
 import { DelegationClient, type SourceCapability } from './client';
 import { correlation, FirstPartyAuthError, httpsUrl, object, readJson, send, Transport } from './transport';
@@ -67,6 +67,8 @@ export interface BoundDelegationBinding extends SessionIdentity {
   subject: string;
   expiresAt: number;
   capability?: SourceCapability;
+  /** Durable attempt marker. A marked generation is never retried. */
+  renewalAttempt?: string;
 }
 
 export interface RenewableDelegationStore extends BoundDelegationStore {
@@ -204,10 +206,21 @@ export class OneApplicationSession {
     const renewed = await coordinator.runExclusive(sessionId, async () => {
       const { binding, revision } = await load();
       if (binding.expiresAt - Date.now() > leadMs) return binding;
+      if (binding.renewalAttempt) {
+        throw new FirstPartyAuthError(409,'SOURCE_RENEWAL_RECOVERY_REQUIRED',requestId,'REAUTHENTICATE');
+      }
       if (!binding.capability) throw new FirstPartyAuthError(401,'SOURCE_CAPABILITY_REQUIRED',requestId,'REAUTHENTICATE');
-      let next;
+      const { capability, ...evidence } = binding;
+      const renewalAttempt = randomUUID();
       try {
-        next = await this.options.delegation.renewSource(binding.capability,requestId);
+        if (!await store.replaceIfCurrent(sessionId,revision,{ ...evidence,renewalAttempt })) {
+          reauthenticate(requestId,'SOURCE_SESSION_CHANGED');
+        }
+        const claimed = await load();
+        if (claimed.binding.renewalAttempt !== renewalAttempt || claimed.revision === revision) {
+          reauthenticate(requestId,'SOURCE_SESSION_CHANGED');
+        }
+        const next = await this.options.delegation.renewSource(capability,requestId);
         const claims = await this.verifySubject(next.subject,binding,requestId);
         if (claims.sessionBinding.sessionId !== binding.centralSessionId || claims.launchAccessEpoch !== binding.accessEpoch) {
           reauthenticate(requestId,'SOURCE_BINDING_CHANGED');
@@ -216,8 +229,8 @@ export class OneApplicationSession {
         if (expiresAt <= Math.max(Date.now(),binding.expiresAt) || expiresAt > next.capability.expiresAt) {
           throw new FirstPartyAuthError(409,'SOURCE_RENEWAL_NOT_ADVANCED',requestId,'REAUTHENTICATE');
         }
-        const replacement = { ...binding,subject:next.subject,expiresAt,capability:next.capability };
-        if (!await store.replaceIfCurrent(sessionId,revision,replacement)) reauthenticate(requestId,'SOURCE_SESSION_CHANGED');
+        const replacement = { ...evidence,subject:next.subject,expiresAt,capability:next.capability };
+        if (!await store.replaceIfCurrent(sessionId,claimed.revision,replacement)) reauthenticate(requestId,'SOURCE_SESSION_CHANGED');
         return replacement;
       } catch (error) {
         if (error instanceof FirstPartyAuthError &&
@@ -231,7 +244,7 @@ export class OneApplicationSession {
     });
     if (renewed) return renewed;
     const after = await load();
-    if (after.revision !== current.revision && after.binding.expiresAt > Date.now()) return after.binding;
+    if (after.revision !== current.revision && !after.binding.renewalAttempt && after.binding.expiresAt > Date.now()) return after.binding;
     throw new FirstPartyAuthError(503,'SOURCE_RENEWAL_IN_PROGRESS',requestId,'RETRY');
   }
 

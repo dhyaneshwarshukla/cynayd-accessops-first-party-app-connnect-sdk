@@ -344,7 +344,8 @@ test('bound callback cannot replace evidence after host logout or mismatched rev
   expect(store.replaceIfCurrent).toHaveBeenCalledWith('host-session', 'before-logout', expect.any(Object));
 });
 
-test.each([false,true])('silent source rotation handles response loss=%s without replaying the old generation', async lose => {
+test.each(['success','lost response','overlapping leases'])('silent source rotation handles %s without replaying the old generation', async scenario => {
+  const lose = scenario === 'lost response';
   const { client, session, expected, status } = await fixture();
   const pending = await client.initiateBoundLaunch('https://connect.example.test/return');
   const launched = await client.redeemBoundLaunch({
@@ -353,17 +354,34 @@ test.each([false,true])('silent source rotation handles response loss=%s without
   const binding: sdk.BoundDelegationBinding = { ...expected, appSlug:'cynayd-connect',accessEpoch:5,
     centralSessionId:'one-session',sessionId:'host-session',subject:launched.subject,
     capability:launched.capability,expiresAt:Date.now()-1 };
-  const store = { load:jest.fn().mockResolvedValue({revision:'original',binding}),
-    replaceIfCurrent:jest.fn().mockResolvedValue(true) };
+  let stored = { revision:'original',binding };
+  const store = { load: async () => stored,
+    replaceIfCurrent: jest.fn(async (_sessionId: string, revision: string, replacement: sdk.BoundDelegationBinding) => {
+      if (stored.revision !== revision) return false;
+      stored = { revision:randomUUID(),binding:replacement };
+      return true;
+    }) };
   const coordinator = { runExclusive: async <T>(_key:string, work:()=>Promise<T>) => work() };
   status.loseRenewalResponse = lose;
-  const renewal = session.renewBoundSession(binding.sessionId,store,coordinator);
+  const renew = () => session.renewBoundSession(binding.sessionId,store,coordinator);
+  const request = jest.spyOn(client,'renewSource');
+  const renewal = renew();
+  if (scenario === 'overlapping leases') {
+    const results = await Promise.allSettled([renewal,renew()]);
+    expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+  }
   if (lose) {
     await expect(renewal).rejects.toMatchObject({ code:'SOURCE_RENEWAL_RECOVERY_REQUIRED' });
-    expect(store.replaceIfCurrent).not.toHaveBeenCalled();
+    expect(stored.binding.capability).toBeUndefined();
+    expect(stored.binding.renewalAttempt).toBeDefined();
+    await expect(session.renewBoundSession(binding.sessionId,store,coordinator))
+      .rejects.toMatchObject({ code:'SOURCE_RENEWAL_RECOVERY_REQUIRED' });
+    expect(store.replaceIfCurrent).toHaveBeenCalledTimes(1);
   } else {
     await expect(renewal).resolves.toMatchObject({capability:{generation:2}});
-    expect(store.replaceIfCurrent).toHaveBeenCalledWith(binding.sessionId,'original',expect.any(Object));
+    expect(stored.binding.renewalAttempt).toBeUndefined();
+    expect(stored.binding.capability?.generation).toBe(2);
   }
+  expect(request).toHaveBeenCalledTimes(1);
   await expect(client.renewSource(binding.capability!)).rejects.toMatchObject({code:'invalid_grant'});
 });
