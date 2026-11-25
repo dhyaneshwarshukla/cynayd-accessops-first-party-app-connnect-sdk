@@ -1,0 +1,62 @@
+name: Publish private SDK
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency: private-sdk-release
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Verify release tag
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          test "$GITHUB_REF" = "refs/tags/v$version"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run example
+      - name: Pack and smoke-test
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          node scripts/pack-private-release.cjs "$version" "$RUNNER_TEMP/sdk-release"
+          cd "$RUNNER_TEMP/sdk-release"
+          sha256sum --check SHA256SUMS
+          mkdir "$RUNNER_TEMP/sdk-smoke"
+          cd "$RUNNER_TEMP/sdk-smoke"
+          npm init -y
+          npm install --omit=dev --ignore-scripts "$RUNNER_TEMP/sdk-release/cynayd-accessops-first-party-app-connnect-sdk-$version.tgz"
+          node node_modules/@cynayd/accessops-first-party-app-connnect-sdk/examples/connect.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checked-sdk-release
+          path: ${{ runner.temp }}/sdk-release/
+          if-no-files-found: error
+  publish:
+    needs: validate
+    environment: private-sdk-registry
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          name: checked-sdk-release
+      - name: Publish restricted package and verify registry integrity
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.SDK_REGISTRY_PUBLISH_TOKEN }}
+        run: |
+          test -n "$NODE_AUTH_TOKEN"
+          sha256sum --check SHA256SUMS
+          package_file="$(awk '{print $2}' SHA256SUMS)"
+          npm publish "./$package_file" --access restricted --registry https://registry.npmjs.org/
+          package_spec="$(node -p 'const [p] = require("./npm-pack.json"); p.name + "@" + p.version')"
+          expected="$(node -p 'require("./npm-pack.json")[0].integrity')"
+          test "$(npm view "$package_spec" dist.integrity --registry https://registry.npmjs.org/)" = "$expected"

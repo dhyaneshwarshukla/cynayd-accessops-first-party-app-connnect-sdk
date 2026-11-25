@@ -1,0 +1,7 @@
+{
+  "kind": "client",
+  "clientId": "cynayd-connect-backend",
+  "appSlug": "cynayd-connect",
+  "audiences": ["cynayd-drive"],
+  "scopes": ["drive:read", "drive:write"]
+}

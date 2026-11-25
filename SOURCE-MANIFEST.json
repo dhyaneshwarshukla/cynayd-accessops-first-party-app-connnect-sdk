@@ -46,5 +46,23 @@
       "checkoutStatus": "Calendar integration test retained in the host application; it depends on Calendar middleware and is not part of the helper-only SDK test target."
     }
   ],
-  "sdkVersion": "0.1.1"
+  "sdkVersion": "0.2.0",
+  "delegation": {
+    "upstream": "cynayd-AccessOps/standalone-backend/src/delegation",
+    "sourceVersion": "d4b43f5",
+    "protocolVersion": 1,
+    "portableFiles": [
+      {
+        "path": "src/delegation/profile.ts",
+        "sha256": "e9d2d7a8daafc2ae366436e7df6da7f051d980571c9258088aa73ee60782e4a9"
+      },
+      {
+        "path": "src/delegation/resource-verifier.ts",
+        "sha256": "99cfd80244947ecc639fa5eac05012686f3092725c76f84222d894b8d883a489"
+      }
+    ],
+    "adaptedFrom": [
+      "client.ts"
+    ]
+  }
 }

@@ -120,3 +120,22 @@ The only credential is `Authorization: Bearer <EdDSA JWT>`. The existing verifie
 Every decision is fetched anew: no positive cache, no time-based decision reuse. `ALLOW` must have AVAILABLE, ACCESSOPS source, effectiveAccess and launchReady true, exact authorityTarget organization/person/installation/application/ACCESS, matching installedAppId and positive integer launchAccessEpoch. A session epoch mismatch requires reauthentication. DENY maps to 403, transport/non-2xx/malformed/incomplete responses to 503. There is no decision-issued-at claim in the current response contract: freshness is established by a new request and session epoch comparison, rather than an invented decision TTL. Revoke applies on the next protected evaluation. Persistent sockets must implement repeated checks and close/reject on failure; the helper does not schedule them. System ingestion without a person needs an explicit separate policy and is not authorized by an employee ALLOW.
 
 Version plus the release tarball SHA-256 in `ACCESSOPS_THREE_APPS_HANDOFF.md` pins the corrected distribution. This package is prepared locally; it does not imply organizational release approval, registration or deployment.
+
+## One authentication and user delegation in v0.2.0
+
+For a first-party backend accessing another app as a signed-in person, use the new One delegation exports in this same package. The v0.1.1 product authorization API remains available.
+
+- [Quick start and app onboarding](docs/integration.md)
+- [Authentication architecture and reuse](docs/architecture.md)
+- [Versioned API contract, token lifecycle and errors](docs/contract-v1.md)
+- [Connect migration and target compatibility](docs/connect-handoff.md)
+- [Local qualification and production decision](docs/qualification.md)
+
+Run `npm ci`, `npm run typecheck`, `npm test` and `npm run example` in the source checkout. The runnable fixture performs both Drive and Calendar operations using one verified source session.
+
+## Connect-to-Drive readiness
+
+- [Connect client proposal and registration review](docs/phase2/registration.md)
+- [Drive route compatibility and target evidence](docs/phase2/drive-compatibility.md)
+- [Connect implementation handoff and authenticated acceptance matrix](docs/phase2/connect-agent.md)
+- [Private registry distribution and release controls](docs/phase2/distribution.md)
