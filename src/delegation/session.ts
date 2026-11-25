@@ -1,6 +1,6 @@
 import { KeyObject } from 'node:crypto';
 import { decodeHeader, SubjectClaims, verifyJwt } from './profile';
-import { DelegationClient } from './client';
+import { DelegationClient, type SourceCapability } from './client';
 import { correlation, FirstPartyAuthError, httpsUrl, object, readJson, send, Transport } from './transport';
 
 export interface SessionIdentity {
@@ -49,6 +49,7 @@ export interface LaunchStateStore {
 export interface BoundLaunchState extends LaunchState {
   request: string;
   verifier: string;
+  renewal?: boolean;
   centralSessionId: string;
   accessEpoch: number;
 }
@@ -65,6 +66,16 @@ export interface BoundDelegationBinding extends SessionIdentity {
   accessEpoch: number;
   subject: string;
   expiresAt: number;
+  capability?: SourceCapability;
+}
+
+export interface RenewableDelegationStore extends BoundDelegationStore {
+  load(sessionId: string): Promise<{ revision: string; binding: BoundDelegationBinding } | undefined>;
+}
+
+export interface SourceRenewalCoordinator {
+  /** Cross-instance exclusive lease. Return undefined without calling work when another instance owns it. */
+  runExclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T | undefined>;
 }
 
 export interface BoundDelegationStore {
@@ -157,8 +168,8 @@ export class OneApplicationSession {
         !state.centralSessionId || !Number.isSafeInteger(state.accessEpoch) || state.accessEpoch < 1) {
       reauthenticate(requestId, 'LAUNCH_STATE_INVALID');
     }
-    const { subject } = await this.options.delegation.redeemBoundLaunch({
-      ...input, verifier: state.verifier, expectedState: input.state,
+    const { subject, capability } = await this.options.delegation.redeemBoundLaunch({
+      ...input, verifier: state.verifier, expectedState: input.state, renewal:state.renewal,
     }, requestId);
     const claims = await this.verifySubject(subject, state.expected, requestId);
     if (claims.sessionBinding.sessionId !== state.centralSessionId || claims.launchAccessEpoch !== state.accessEpoch) {
@@ -166,13 +177,62 @@ export class OneApplicationSession {
     }
     const binding = { ...state.expected, sessionId: state.sessionId, centralSessionId: state.centralSessionId,
       appSlug: this.options.appSlug, accessEpoch: state.accessEpoch, subject,
-      expiresAt: Math.min(claims.exp!, claims.sessionBinding.expiresAt) * 1000 };
+      expiresAt: Math.min(claims.exp!, claims.sessionBinding.expiresAt) * 1000, ...(capability ? {capability} : {}) };
     if (binding.expiresAt <= Date.now()) reauthenticate(requestId, 'SOURCE_SESSION_EXPIRED');
     let stored;
     try { stored = await store.replaceIfCurrent(binding.sessionId, state.revision, binding); }
     catch { throw new FirstPartyAuthError(503, 'CREDENTIAL_STORE_UNAVAILABLE', requestId, 'RETRY'); }
     if (!stored) reauthenticate(requestId, 'SOURCE_SESSION_CHANGED');
     return binding;
+  }
+
+  async renewBoundSession(sessionId: string, store: RenewableDelegationStore, coordinator: SourceRenewalCoordinator,
+    leadMs = 30_000, suppliedRequestId?: string): Promise<BoundDelegationBinding> {
+    const requestId = correlation(suppliedRequestId);
+    if (!Number.isSafeInteger(leadMs) || leadMs < 0) throw new RangeError('Invalid renewal lead time');
+    const load = async () => {
+      let current;
+      try { current = await store.load(sessionId); }
+      catch { throw new FirstPartyAuthError(503,'CREDENTIAL_STORE_UNAVAILABLE',requestId,'RETRY'); }
+      if (!current || current.binding.sessionId !== sessionId || current.binding.appSlug !== this.options.appSlug) {
+        reauthenticate(requestId,'SOURCE_SESSION_CHANGED');
+      }
+      return current;
+    };
+    const current = await load();
+    if (current.binding.expiresAt - Date.now() > leadMs) return current.binding;
+    const renewed = await coordinator.runExclusive(sessionId, async () => {
+      const { binding, revision } = await load();
+      if (binding.expiresAt - Date.now() > leadMs) return binding;
+      if (!binding.capability) throw new FirstPartyAuthError(401,'SOURCE_CAPABILITY_REQUIRED',requestId,'REAUTHENTICATE');
+      let next;
+      try {
+        next = await this.options.delegation.renewSource(binding.capability,requestId);
+        const claims = await this.verifySubject(next.subject,binding,requestId);
+        if (claims.sessionBinding.sessionId !== binding.centralSessionId || claims.launchAccessEpoch !== binding.accessEpoch) {
+          reauthenticate(requestId,'SOURCE_BINDING_CHANGED');
+        }
+        const expiresAt = Math.min(claims.exp!,claims.sessionBinding.expiresAt) * 1000;
+        if (expiresAt <= Math.max(Date.now(),binding.expiresAt) || expiresAt > next.capability.expiresAt) {
+          throw new FirstPartyAuthError(409,'SOURCE_RENEWAL_NOT_ADVANCED',requestId,'REAUTHENTICATE');
+        }
+        const replacement = { ...binding,subject:next.subject,expiresAt,capability:next.capability };
+        if (!await store.replaceIfCurrent(sessionId,revision,replacement)) reauthenticate(requestId,'SOURCE_SESSION_CHANGED');
+        return replacement;
+      } catch (error) {
+        if (error instanceof FirstPartyAuthError &&
+            (error.code === 'SOURCE_SESSION_CHANGED' || ['UNLOCK','REAUTHENTICATE','ACCESS_DENIED'].includes(error.nextAction))) {
+          throw error;
+        }
+        // A response or storage failure may have spent the old capability.
+        // Never retry it automatically or replay the surrounding operation.
+        throw new FirstPartyAuthError(409,'SOURCE_RENEWAL_RECOVERY_REQUIRED',requestId,'REAUTHENTICATE');
+      }
+    });
+    if (renewed) return renewed;
+    const after = await load();
+    if (after.revision !== current.revision && after.binding.expiresAt > Date.now()) return after.binding;
+    throw new FirstPartyAuthError(503,'SOURCE_RENEWAL_IN_PROGRESS',requestId,'RETRY');
   }
 
   private async verifySubject(subject: string, expected: SessionIdentity, requestId: string): Promise<SubjectClaims> {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0-rc.3
+
+- Add disabled-by-default confidential source renewal and protected host
+  credential coordination.
+- Rotate source capabilities once and use verified browser recovery after an
+  ambiguous response. Existing bound launch without renewal remains compatible.
+
+
 ## 0.6.0-rc.2
 
 - Validate the bound launch callback and write delegation evidence through the

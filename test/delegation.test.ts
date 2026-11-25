@@ -343,3 +343,27 @@ test('bound callback cannot replace evidence after host logout or mismatched rev
   }, states, store)).rejects.toMatchObject({ code: 'SOURCE_SESSION_CHANGED' });
   expect(store.replaceIfCurrent).toHaveBeenCalledWith('host-session', 'before-logout', expect.any(Object));
 });
+
+test.each([false,true])('silent source rotation handles response loss=%s without replaying the old generation', async lose => {
+  const { client, session, expected, status } = await fixture();
+  const pending = await client.initiateBoundLaunch('https://connect.example.test/return');
+  const launched = await client.redeemBoundLaunch({
+    ...pending, code: pending.request, expectedState:pending.state, renewal:true,
+  });
+  const binding: sdk.BoundDelegationBinding = { ...expected, appSlug:'cynayd-connect',accessEpoch:5,
+    centralSessionId:'one-session',sessionId:'host-session',subject:launched.subject,
+    capability:launched.capability,expiresAt:Date.now()-1 };
+  const store = { load:jest.fn().mockResolvedValue({revision:'original',binding}),
+    replaceIfCurrent:jest.fn().mockResolvedValue(true) };
+  const coordinator = { runExclusive: async <T>(_key:string, work:()=>Promise<T>) => work() };
+  status.loseRenewalResponse = lose;
+  const renewal = session.renewBoundSession(binding.sessionId,store,coordinator);
+  if (lose) {
+    await expect(renewal).rejects.toMatchObject({ code:'SOURCE_RENEWAL_RECOVERY_REQUIRED' });
+    expect(store.replaceIfCurrent).not.toHaveBeenCalled();
+  } else {
+    await expect(renewal).resolves.toMatchObject({capability:{generation:2}});
+    expect(store.replaceIfCurrent).toHaveBeenCalledWith(binding.sessionId,'original',expect.any(Object));
+  }
+  await expect(client.renewSource(binding.capability!)).rejects.toMatchObject({code:'invalid_grant'});
+});

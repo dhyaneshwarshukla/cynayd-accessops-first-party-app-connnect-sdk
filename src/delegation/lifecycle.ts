@@ -1,11 +1,13 @@
 import { DelegationClient, CentralSessionStatus } from './client';
-import { VerifiedSession } from './session';
+import type { VerifiedSession, BoundDelegationBinding } from './session';
+
+type LifecycleBinding = VerifiedSession | BoundDelegationBinding;
 import { FirstPartyAuthError } from './transport';
 import { sourceRecoveryStatus } from './renewal';
 
 /** Call after authenticating the host session, and compose with the application's operation ACL. */
 export async function withCentralSession<T>(
-  client: DelegationClient, binding: VerifiedSession,
+  client: DelegationClient, binding: LifecycleBinding,
   operation: (state: CentralSessionStatus) => Promise<T>, requestId?: string,
 ): Promise<T> {
   return operation(await client.sessionStatus(binding, requestId));
@@ -23,7 +25,7 @@ type Listener = (event: SessionEvent) => void;
 
 interface Monitor {
   listeners: Set<Listener>;
-  load: () => Promise<VerifiedSession | undefined>;
+  load: () => Promise<LifecycleBinding | undefined>;
   timer?: ReturnType<typeof setTimeout>;
   last?: SessionEventType;
   lock: boolean;
@@ -73,7 +75,7 @@ export class SessionEventMonitor {
     }
   }
 
-  private async refreshState(key: string, monitor: Monitor, binding: VerifiedSession) {
+  private async refreshState(key: string, monitor: Monitor, binding: LifecycleBinding) {
     const state = await this.client.sessionStatus(binding);
     if (this.active.get(key) !== monitor) return;
     if (monitor.lock) this.emit(monitor, { type: 'SESSION_UNLOCKED', revision: state.revision ?? undefined });
@@ -87,7 +89,7 @@ export class SessionEventMonitor {
       const binding = await monitor.load();
       if (this.active.get(key) !== monitor) return;
       if (!binding) { this.logout(key); return; }
-      if ((binding.sourceEvidence?.subjectExpiresAt ?? binding.expiresAt) <= Date.now()) {
+      if ((('sourceEvidence' in binding ? binding.sourceEvidence?.subjectExpiresAt : undefined) ?? binding.expiresAt) <= Date.now()) {
         this.emit(monitor, { type: 'CREDENTIAL_RENEWAL_REQUIRED' });
       } else {
         await this.refreshState(key, monitor, binding);

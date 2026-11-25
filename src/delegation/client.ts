@@ -2,6 +2,9 @@ import { randomBytes } from 'crypto';
 import { ACCESS_TOKEN_TYPE, ASSERTION_TYPE, EXCHANGE_GRANT, digest } from './profile';
 import { DelegationSigner } from './signer';
 import type { VerifiedSession } from './session';
+
+export type DelegationBinding = Pick<VerifiedSession,'sessionId'|'subject'|'expiresAt'|'accessEpoch'>;
+export interface SourceCapability { value:string; generation:number; expiresAt:number }
 import { correlation, FirstPartyAuthError, httpsUrl, readJson, send, Transport } from './transport';
 
 export interface RegisteredOperation {
@@ -24,6 +27,7 @@ export interface DelegationClientOptions extends Transport {
   activityEndpoint?: string;
   boundLaunchInitiationEndpoint?: string;
   boundLaunchRedemptionEndpoint?: string;
+  sourceRenewalEndpoint?: string;
 }
 
 export type ActivityOperation = 'message.send' | 'document.edit' | 'presentation.edit' | 'spreadsheet.edit' |
@@ -52,7 +56,8 @@ export class DelegationClient {
       options.sessionStatusEndpoint ?? options.launchEvaluationEndpoint,
       options.activityEndpoint ?? options.launchEvaluationEndpoint,
       options.boundLaunchInitiationEndpoint ?? options.launchEvaluationEndpoint,
-      options.boundLaunchRedemptionEndpoint ?? options.launchEvaluationEndpoint].map(httpsUrl);
+      options.boundLaunchRedemptionEndpoint ?? options.launchEvaluationEndpoint,
+      options.sourceRenewalEndpoint ?? options.launchEvaluationEndpoint].map(httpsUrl);
     if (endpoints.some(url => url.search || url.origin !== endpoints[0].origin)) {
       throw new Error('One endpoints must have a common trusted origin and no query');
     }
@@ -88,7 +93,7 @@ export class DelegationClient {
   }
 
   /** The host must atomically consume the initiating browser's stored transaction first. */
-  async redeemBoundLaunch(input: { request: string; verifier: string; expectedState: string; state: string; code: string },
+  async redeemBoundLaunch(input: { request: string; verifier: string; expectedState: string; state: string; code: string; renewal?: boolean },
     suppliedRequestId?: string) {
     const requestId = correlation(suppliedRequestId);
     const endpoint = this.options.boundLaunchRedemptionEndpoint;
@@ -96,11 +101,38 @@ export class DelegationClient {
     if (!/^[A-Za-z0-9_-]{43}$/.test(input.state) || input.state !== input.expectedState) {
       throw new FirstPartyAuthError(401, 'SOURCE_BINDING_INVALID', requestId, 'REAUTHENTICATE');
     }
-    const result = await this.form(endpoint, { request: input.request, code: input.code, verifier: input.verifier }, requestId);
+    const result = await this.form(endpoint, { request: input.request, code: input.code, verifier: input.verifier,
+      ...(input.renewal ? { renewal: 'true' } : {}) }, requestId);
     if (typeof result.subject_token !== 'string' || !result.subject_token) {
       throw new FirstPartyAuthError(503, 'UPSTREAM_PROFILE_MISMATCH', requestId, 'INVESTIGATE');
     }
-    return { subject: result.subject_token };
+    return { subject: result.subject_token, ...(input.renewal ? { capability:this.readCapability(result,1,requestId) } : {}) };
+  }
+
+  private readCapability(result: Record<string,unknown>, expectedGeneration:number, requestId:string): SourceCapability {
+    if (typeof result.renewal_capability !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(result.renewal_capability) ||
+        result.renewal_generation !== expectedGeneration || typeof result.renewal_expires_at !== 'number' ||
+        !Number.isSafeInteger(result.renewal_expires_at) || result.renewal_expires_at * 1000 <= Date.now()) {
+      throw new FirstPartyAuthError(503,'UPSTREAM_PROFILE_MISMATCH',requestId,'INVESTIGATE');
+    }
+    return { value:result.renewal_capability,generation:expectedGeneration,expiresAt:result.renewal_expires_at * 1000 };
+  }
+
+  /** Sends one attempt. A timeout may mean the authority committed the rotation. */
+  async renewSource(capability: SourceCapability, suppliedRequestId?: string) {
+    const requestId = correlation(suppliedRequestId);
+    const endpoint = this.options.sourceRenewalEndpoint;
+    if (!endpoint) throw new FirstPartyAuthError(503,'SOURCE_RENEWAL_NOT_CONFIGURED',requestId,'INVESTIGATE');
+    if (!/^[A-Za-z0-9_-]{43}$/.test(capability.value) ||
+        !Number.isSafeInteger(capability.generation) || capability.generation < 1 || capability.generation > 2147483646 ||
+        !Number.isSafeInteger(capability.expiresAt) || capability.expiresAt <= Date.now()) {
+      throw new FirstPartyAuthError(401,'SOURCE_CAPABILITY_EXPIRED',requestId,'REAUTHENTICATE');
+    }
+    const result = await this.form(endpoint,{capability:capability.value,generation:String(capability.generation)},requestId);
+    if (typeof result.subject_token !== 'string' || !result.subject_token) {
+      throw new FirstPartyAuthError(503,'UPSTREAM_PROFILE_MISMATCH',requestId,'INVESTIGATE');
+    }
+    return { subject:result.subject_token,capability:this.readCapability(result,capability.generation+1,requestId) };
   }
 
   evaluateLaunch(subject: string, requestId?: string) {
@@ -110,7 +142,7 @@ export class DelegationClient {
   }
 
   /** One read-only, confidential status request. Keep the verified subject server-side. */
-  async sessionStatus(binding: VerifiedSession, suppliedRequestId?: string): Promise<CentralSessionStatus> {
+  async sessionStatus(binding: DelegationBinding, suppliedRequestId?: string): Promise<CentralSessionStatus> {
     const requestId = correlation(suppliedRequestId);
     const endpoint = this.options.sessionStatusEndpoint;
     if (!endpoint) throw new FirstPartyAuthError(503, 'SESSION_STATUS_NOT_CONFIGURED', requestId, 'INVESTIGATE');
@@ -133,7 +165,7 @@ export class DelegationClient {
   }
 
   /** Use only after a policy-qualified interactive command has been accepted by the application backend. */
-  async reportActivity(binding: VerifiedSession, operation: ActivityOperation, eventId: string, suppliedRequestId?: string) {
+  async reportActivity(binding: DelegationBinding, operation: ActivityOperation, eventId: string, suppliedRequestId?: string) {
     const requestId = correlation(suppliedRequestId);
     const endpoint = this.options.activityEndpoint;
     if (!endpoint) throw new FirstPartyAuthError(503, 'ACTIVITY_NOT_CONFIGURED', requestId, 'INVESTIGATE');
@@ -176,7 +208,7 @@ export class DelegationClient {
   }
 
   /** Authorization stays inside the backend. The caller forwards only sanitized target results. */
-  async call(binding: VerifiedSession, operation: RegisteredOperation,
+  async call(binding: DelegationBinding, operation: RegisteredOperation,
     publicUrl: string, init: Omit<RequestInit, 'method'> = {}, suppliedRequestId?: string): Promise<Response> {
     const requestId = correlation(suppliedRequestId);
     if (!binding.subject || !binding.sessionId || !Number.isFinite(binding.expiresAt) || binding.expiresAt <= Date.now()) {

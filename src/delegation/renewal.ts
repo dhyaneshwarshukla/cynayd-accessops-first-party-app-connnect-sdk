@@ -3,7 +3,7 @@ import { correlation, FirstPartyAuthError, httpsUrl } from './transport';
 
 export type SourceRecoveryStatus = 'ACTIVE' | 'RENEWAL_DUE' | 'EXPIRED';
 
-export function sourceRecoveryStatus(session: VerifiedSession, leadMs = 60_000, now = Date.now()): SourceRecoveryStatus {
+export function sourceRecoveryStatus(session: Pick<VerifiedSession, 'expiresAt'>, leadMs = 60_000, now = Date.now()): SourceRecoveryStatus {
   if (!Number.isFinite(leadMs) || leadMs < 0) throw new RangeError('Invalid renewal lead time');
   if (session.expiresAt <= now) return 'EXPIRED';
   return session.expiresAt - now <= leadMs ? 'RENEWAL_DUE' : 'ACTIVE';

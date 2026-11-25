@@ -18,6 +18,7 @@ function mockServices(sdk) {
     activityEndpoint: one + '/api/v1/delegations/activity',
     boundLaunchInitiationEndpoint: one + '/api/v1/delegations/bound-launch-initiate',
     boundLaunchRedemptionEndpoint: one + '/api/v1/delegations/bound-launch-redeem',
+    sourceRenewalEndpoint: one + '/api/v1/delegations/source-renewal',
   };
   const expected = { userId: 'person-test', organizationId: 'tenant-test', installedAppId: 'connect-install-test' };
   const status = { active: true, allowed: true, acl: true, available: true, replayAvailable: true, expires: false,
@@ -44,6 +45,12 @@ function mockServices(sdk) {
   const redeemedCodes = new Set();
   const activityEvents = new Set();
   const boundLaunches = new Map();
+  const capabilities = new Map();
+  function renewalResult(generation) {
+    const value = randomBytes(32).toString('base64url');
+    capabilities.set(value,generation);
+    return { subject_token:subject,renewal_capability:value,renewal_generation:generation,renewal_expires_at:start+900 };
+  }
 
   function proofIsValid(proof, method, url, token, thumbprint) {
     const head = jwt.decode(proof, { complete: true })?.header;
@@ -115,7 +122,16 @@ function mockServices(sdk) {
         const challenge = createHash('sha256').update(body.get('verifier')).digest('base64url');
         if (expected !== challenge) return response({ error: 'invalid_grant' }, 400);
         boundLaunches.delete(request);
-        return response({ subject_token: subject });
+        return response(body.get('renewal') === 'true' ? renewalResult(1) : { subject_token: subject });
+      }
+      if (url === endpoints.sourceRenewalEndpoint) {
+        const value = body.get('capability');
+        const generation = capabilities.get(value);
+        if (!generation || String(generation) !== body.get('generation')) return response({ error:'invalid_grant' },401);
+        capabilities.delete(value);
+        const result = renewalResult(generation+1);
+        if (status.loseRenewalResponse) throw new Error('fixture network disconnect');
+        return response(result);
       }
       if (!status.active || !subjects.has(body.get('subject_token')) || id !== 'connect-fixture') return response({ error: 'invalid_grant' }, 400);
       if (!status.allowed) return response({ error: 'access_denied' }, 403);

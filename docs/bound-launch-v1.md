@@ -1,8 +1,7 @@
 # Bound application launch candidate
 
-SDK 0.6.0-rc.2 adds host callback completion to the server-only initiation and redemption helpers.
-This candidate issues a delegation subject using the existing One launch
-deadline. It includes no renewal capability or source-renewal endpoint.
+SDK 0.6.0-rc.3 adds host callback completion to the server-only initiation and redemption helpers.
+The default flow issues a delegation subject capped by the existing One launch deadline. The disabled-by-default source renewal pilot is described below.
 
 Set the One pilot flag ONE_BOUND_LAUNCH_ENABLED only in a qualified
 environment. Set ONE_BOUND_LAUNCH_CALLBACKS to a JSON object keyed by the
@@ -99,9 +98,54 @@ It changes neither receipt expiry nor session activity.
 
 Passkeys, mobile approval, email, and recovery evidence cannot contribute to
 this pilot. They retain existing sign-in behavior. Legacy, Go SHADOW, Orbit
-and SAML are outside the continuing pilot. No product endpoint invokes this
-mode to issue credentials yet. Before issuance, independently review current
-risk and required step-up handling, lazy idle lock and central logout
-serialization, atomic capability rotation and credential-generation invalidation
-of previously issued renewed subjects. AccessOps remains a separate live
-authorization boundary.
+and SAML are outside the continuing pilot. Source renewal is limited to static policies with no enabled conditional rules,
+required dynamic context or risk detection. Apps must still enforce their
+operation-specific step-up controls. Policies outside this profile require
+verified browser recovery. Independently review the pilot constraints and
+transaction before activation. AccessOps remains a separate live authorization
+boundary.
+
+## Source renewal pilot
+
+Set neither pilot switch in production before independent review and authenticated
+acceptance. The local pilot requires ONE_SOURCE_RENEWAL_ENABLED on Identity and
+Go, ONE_CONTINUING_SOURCE_ASSURANCE_ENABLED on Go, and configured central
+inactivity locking. It uses additive migration 0207.
+
+A host opts in using renewal: true in its protected bound launch transaction.
+The SDK sends renewal=true only on the confidential redemption endpoint. The
+response includes subject_token, subject_expires_at, renewal_capability,
+renewal_generation, and renewal_expires_at. The subject is capped at two minutes
+and the applicable assurance deadline. Deadline values are Unix seconds.
+The capability is 32 random bytes encoded as base64url. One stores its digest.
+
+POST /api/v1/delegations/source-renewal is form encoded. Supply capability,
+generation, client_id, client_assertion, client_assertion_type, and DPoP.
+The registered client, assertion key, DPoP thumbprint, app, tenant,
+installation, epoch, session and original verification are fixed. The Go
+transaction locks current policy, attempt, device, One session, credentials,
+account and registration. It compares the lock revision and capability
+generation, then commits the successor digest and new source provenance
+together. One signs and releases the subject after commit. A lost response
+never recovers a spent generation.
+
+Use OneApplicationSession.renewBoundSession with an encrypted server-side
+RenewableDelegationStore and cross-instance SourceRenewalCoordinator. The host
+must keep a durable host revision, invalidate it on logout, and atomically
+advance it with each replacement. Configure a bounded exclusive lease and a
+bounded upstream transport deadline. No active lease means reload newer stored
+evidence or report renewal in progress. An uncertain response requires verified
+browser recovery. The SDK never retries the old capability. Keep this
+credential recovery separate from any business-operation retry.
+
+Renewed subjects remain limited to the same sender. Live validation rechecks
+the continuing assurance and source authorization. AccessOps decisions are
+external to the Go PostgreSQL commit and remain live on protected use. A
+session or credential revoked after commit is rejected on its next live check.
+No capability or subject belongs in a browser, callback URL, log, or event.
+
+The local fixture covers atomic rotation under concurrency, stale revision,
+password replacement, revocation, wrong sender and lost responses. Complete
+authenticated browser and multi-instance staging scenarios, review lock order
+against deployment writers, and qualify operation-specific step-up and authority
+load before enabling any pilot. Other authority modes remain unsupported.
