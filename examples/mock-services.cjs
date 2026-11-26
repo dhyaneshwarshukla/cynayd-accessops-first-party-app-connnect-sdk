@@ -122,6 +122,14 @@ function mockServices(sdk) {
         const challenge = createHash('sha256').update(body.get('verifier')).digest('base64url');
         if (expected !== challenge) return response({ error: 'invalid_grant' }, 400);
         boundLaunches.delete(request);
+        if (body.get('renewal') === 'optional') {
+          if (status.boundLaunchError) return response({ error: status.boundLaunchError }, 403);
+          if (status.renewalStatus === 'ineligible') return response({ subject_token: subject, renewal_status: 'ineligible' });
+          if (status.renewalStatus === 'missing') return response({ subject_token: subject });
+          if (status.renewalStatus === 'broken') return response({ subject_token: subject, renewal_status: 'eligible' });
+          return response({ ...renewalResult(1), renewal_status: 'eligible' });
+        }
+        if (status.renewalStatus === 'ineligible') return response({ subject_token: subject });
         return response(body.get('renewal') === 'true' ? renewalResult(1) : { subject_token: subject });
       }
       if (url === endpoints.sourceRenewalEndpoint) {

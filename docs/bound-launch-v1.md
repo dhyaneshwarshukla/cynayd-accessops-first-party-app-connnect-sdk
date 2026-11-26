@@ -154,3 +154,18 @@ password replacement, revocation, wrong sender and lost responses. Complete
 authenticated browser and multi-instance staging scenarios, review lock order
 against deployment writers, and qualify operation-specific step-up and authority
 load before enabling any pilot. Other authority modes remain unsupported.
+
+### Optional renewal in 0.6.0-rc.5
+
+Send `renewal=optional` during bound redemption to negotiate silent source
+renewal. One returns `renewal_status: "eligible"` with the generation-one
+capability, or `renewal_status: "ineligible"` with the ordinary verified
+delegation subject. Store that subject using the same host session revision
+check and retain verified browser recovery. A missing discriminator or a
+malformed eligible response is a protocol failure.
+
+Without a renewal parameter the original subject-only response still applies.
+`renewal=true` still requires a capability. Lock, revocation, required step-up,
+authorization denial and authority outage remain errors. Bound redemption
+still consumes each code once. Recover an ambiguous response through a fresh
+verified browser transaction. Keep credentials and capability values server-side.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0-rc.5
+
+- Negotiate optional renewal during confidential bound launch. Explicitly
+  ineligible sessions keep verified browser recovery. Mandatory renewal
+  continues to require a valid capability.
+
 ## 0.6.0-rc.4
 
 - Claim each renewal generation durably before sending it to One. Response loss,

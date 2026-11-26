@@ -49,7 +49,7 @@ export interface LaunchStateStore {
 export interface BoundLaunchState extends LaunchState {
   request: string;
   verifier: string;
-  renewal?: boolean;
+  renewal?: boolean | 'optional';
   centralSessionId: string;
   accessEpoch: number;
 }

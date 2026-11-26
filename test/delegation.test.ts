@@ -385,3 +385,27 @@ test.each(['success','lost response','overlapping leases'])('silent source rotat
   expect(request).toHaveBeenCalledTimes(1);
   await expect(client.renewSource(binding.capability!)).rejects.toMatchObject({code:'invalid_grant'});
 });
+
+test.each(['eligible', 'ineligible', 'missing', 'broken'])('negotiates optional bound renewal: %s', async renewalStatus => {
+  const { client, status } = await fixture();
+  status.renewalStatus = renewalStatus;
+  const pending = await client.initiateBoundLaunch('https://connect.example.test/return');
+  const result = client.redeemBoundLaunch({
+    ...pending, expectedState: pending.state, code: pending.request, renewal: 'optional',
+  });
+  if (renewalStatus === 'missing' || renewalStatus === 'broken') {
+    await expect(result).rejects.toMatchObject({ code: 'UPSTREAM_PROFILE_MISMATCH' });
+  } else {
+    await expect(result).resolves.toMatchObject({ renewalStatus,
+      capability: renewalStatus === 'eligible' ? expect.objectContaining({ generation: 1 }) : undefined });
+  }
+});
+
+test('mandatory bound renewal still requires a valid capability', async () => {
+  const { client, status } = await fixture();
+  status.renewalStatus = 'ineligible';
+  const pending = await client.initiateBoundLaunch('https://connect.example.test/return');
+  await expect(client.redeemBoundLaunch({
+    ...pending, expectedState: pending.state, code: pending.request, renewal: true,
+  })).rejects.toMatchObject({ code: 'UPSTREAM_PROFILE_MISMATCH' });
+});

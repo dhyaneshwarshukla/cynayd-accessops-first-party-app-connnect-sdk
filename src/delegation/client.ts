@@ -93,7 +93,7 @@ export class DelegationClient {
   }
 
   /** The host must atomically consume the initiating browser's stored transaction first. */
-  async redeemBoundLaunch(input: { request: string; verifier: string; expectedState: string; state: string; code: string; renewal?: boolean },
+  async redeemBoundLaunch(input: { request: string; verifier: string; expectedState: string; state: string; code: string; renewal?: boolean | 'optional' },
     suppliedRequestId?: string) {
     const requestId = correlation(suppliedRequestId);
     const endpoint = this.options.boundLaunchRedemptionEndpoint;
@@ -102,8 +102,19 @@ export class DelegationClient {
       throw new FirstPartyAuthError(401, 'SOURCE_BINDING_INVALID', requestId, 'REAUTHENTICATE');
     }
     const result = await this.form(endpoint, { request: input.request, code: input.code, verifier: input.verifier,
-      ...(input.renewal ? { renewal: 'true' } : {}) }, requestId);
+      ...(input.renewal ? { renewal: input.renewal === 'optional' ? 'optional' : 'true' } : {}) }, requestId);
     if (typeof result.subject_token !== 'string' || !result.subject_token) {
+      throw new FirstPartyAuthError(503, 'UPSTREAM_PROFILE_MISMATCH', requestId, 'INVESTIGATE');
+    }
+    if (input.renewal === 'optional') {
+      if (result.renewal_status === 'eligible') {
+        return { subject: result.subject_token, renewalStatus: 'eligible' as const,
+          capability: this.readCapability(result, 1, requestId) };
+      }
+      if (result.renewal_status === 'ineligible' && !('renewal_capability' in result) &&
+          !('renewal_generation' in result) && !('renewal_expires_at' in result)) {
+        return { subject: result.subject_token, renewalStatus: 'ineligible' as const, capability: undefined };
+      }
       throw new FirstPartyAuthError(503, 'UPSTREAM_PROFILE_MISMATCH', requestId, 'INVESTIGATE');
     }
     return { subject: result.subject_token, ...(input.renewal ? { capability:this.readCapability(result,1,requestId) } : {}) };
