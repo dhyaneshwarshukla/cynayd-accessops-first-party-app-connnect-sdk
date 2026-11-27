@@ -28,6 +28,7 @@
     "AGENTS.md",
     "docs",
     "examples",
+    "tooling/registration",
     "CHANGELOG.md",
     "SECURITY.md",
     "src",
@@ -38,6 +39,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "jest --runInBand",
     "example": "npm run build && node examples/connect.cjs",
+    "test:registration": "node --test test/registration/workflow.test.cjs",
+    "registration": "node tooling/registration/register.cjs",
     "prepare": "npm run build"
   },
   "devDependencies": {

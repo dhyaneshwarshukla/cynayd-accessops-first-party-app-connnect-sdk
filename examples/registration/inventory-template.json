@@ -1,0 +1,18 @@
+{
+  "contract": "one-registration-v1",
+  "observedAt": "<current authorized observation timestamp>",
+  "appSlug": "example-app",
+  "requestedClientId": "example-app-backend",
+  "clients": [],
+  "installations": [
+    {
+      "organizationId": "example-org",
+      "installationId": "example-app-installation",
+      "appSlug": "example-app",
+      "active": true
+    }
+  ],
+  "resources": [],
+  "grants": [],
+  "frameOrigins": []
+}

@@ -1,0 +1,31 @@
+{
+  "appSlug": "cynayd-docs",
+  "assertion": {
+    "kid": "cynayd-docs-rsa-20261027-adae862af6",
+    "notAfter": "2027-01-25T04:42:38.402000Z",
+    "notBefore": "2026-10-27T04:42:38.402000Z",
+    "publicJwk": {
+      "e": "AQAB",
+      "kty": "RSA",
+      "n": "v3d3iUSv-YT0dSBTNPe7cTlOWPt8tBqdO0y7eawaSyM5zcMmQHY4Y-yy-6-qXDIjLzCZuuiIwZLGtQIjBIQX8NyDZ3J-XjeKdEx5s8FWb06vHLkKSXfqTFxW7E4cSjP0i58cmkx1u4HGSFVdAQ4M-d6x4ijKRfIISWTif4UvXAyszccMVsCiEamoNURGPxIM3EDb5xrn6VoETHlmtTCRuYJLc2LX9BDPF-rRId7854U_pd4Ep_aV5-dRDdLryb8uLrtiGlG-L30oVpU-H0hfxwfkhxSp1U_Q8s13qC0S6rkRYlLJ6fix7v5cEhNe_7ni4rNcLpqJ1r7g9d0xvKgjU6zETSE-fo_1rOFHGyVmJ_e6DjsRm5WzipPw1RdY1XV7la-srAJanPOsx9KtiAgQId1zjD5GyGwWNzVBkOa5sVjDMCJbzMldRBHOoRHxiI9PEq8Q8mJPDU9Alfo27mlnTdcnoth9m7ms5FPkDLjGFO2XJoaFRfctbDFYtblD82an"
+    }
+  },
+  "client": null,
+  "clientId": "cynayd-docs-backend",
+  "grants": [],
+  "installations": [
+    {
+      "installationId": "c7be808b-7f1d-413d-b5f9-d1a9318c7563",
+      "organizationId": "cmiktjw42000rupjsnjgv89kb"
+    }
+  ],
+  "mode": "reuse",
+  "profile": {
+    "callback": "https://docs.cynayd.com/api/auth/one/callback",
+    "landing": "https://docs.cynayd.com/",
+    "proofThumbprints": [
+      "MuvwkYunLIHFYrvt29at4nU-MVbwDSpqG-0cQsAQPsE"
+    ]
+  },
+  "version": 1
+}

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "appSlug": "example-app",
+  "clientId": "example-app-backend",
+  "mode": "create",
+  "client": { "audiences": [], "scopes": [] },
+  "profile": {
+    "callback": "https://app.example.test/api/auth/one/callback",
+    "landing": "https://app.example.test/"
+  },
+  "installations": [
+    { "organizationId": "example-org", "installationId": "example-app-installation" }
+  ],
+  "grants": []
+}

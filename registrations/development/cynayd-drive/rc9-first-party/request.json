@@ -1,0 +1,31 @@
+{
+  "appSlug": "cynayd-drive",
+  "assertion": {
+    "kid": "cynayd-drive-rsa-20261027-82c4a06e1d",
+    "notAfter": "2027-01-25T04:42:39.306000Z",
+    "notBefore": "2026-10-27T04:42:39.306000Z",
+    "publicJwk": {
+      "e": "AQAB",
+      "kty": "RSA",
+      "n": "kIVyUw2UUMFnbGLB4428DdUTlRRSE4Ljfjs5GG6XaD3tE0GIox1hoyxUeCq9bv2b8okwwQhCCcVyVsCmI_3bVIMwlosn0NE56XLGsfgd0EB3F1NRbkT7OIUaTQO4gRbkPgUy_G44amMQ85vFP3VftalBVjHNtQtPbW7Ga9CKL0zidt1N89TN9Ej8BPc7jwiPxuxtyZNr7I09AX_ar5mxJ0j0jLadj5Ft_r4VPkpDiRqrzOE8pyRbGUg1B3cuk1_y39VwexbPQYKY7Ln4nZmnXu9gg8s3YVh-iKEr_vWH8WM_qjzeQIEiIA0KV-dLzRK0fFczjt7riXR_voYDjk-h8J1CKWXZfzq-4BRxZxO2ChNCa23jHc5z_xWennkpcrjRXCuYyvp_lxmxCKApPHoS6xMRuHhU9aQFuiHpxVUoq1bMC_at1Kv2rnEHjN-PKOQOBc9Gb55ebp0KeT-_IozRpsYnRpL6bhN0g48bOTRXzkStlMhMzU_EuCOVemook1bH"
+    }
+  },
+  "client": null,
+  "clientId": "cynayd-drive-resource",
+  "grants": [],
+  "installations": [
+    {
+      "installationId": "000f4cdc-105b-4457-acc4-438f917db4a5",
+      "organizationId": "cmiktjw42000rupjsnjgv89kb"
+    }
+  ],
+  "mode": "reuse",
+  "profile": {
+    "callback": "https://drive.cynayd.com/api/auth/one/callback",
+    "landing": "https://drive.cynayd.com/",
+    "proofThumbprints": [
+      "E_lxQWwMMDVaxmaXPl_rdZ7bficE9wqP3icxMbPg2Ew"
+    ]
+  },
+  "version": 1
+}

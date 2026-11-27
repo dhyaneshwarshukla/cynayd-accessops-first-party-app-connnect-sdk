@@ -87,3 +87,9 @@ node examples/host/express.cjs
 ```
 
 Serve the application through its existing HTTPS proxy on the registered origin. The root page exercises browser launch, live status, embedded unlock, and local logout. The protected example at `/api/me` returns the verified identity projection. For local contract qualification with a disposable database and fixture authority, run the commands in the [README](../README.md).
+
+## Registration from a separate application server
+
+Use the [cross-server registration workflow](registration-workflow.md) to generate
+and publish a public Git request for One operator review. It includes registration
+preflight, preservation of existing client permissions, and audited publication.

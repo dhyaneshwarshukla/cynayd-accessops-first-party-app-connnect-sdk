@@ -50,3 +50,7 @@ Use the [resource template](../examples/registration/resource.json) and [grant t
 ```sh
 node examples/registration/check-origin.cjs https://one.example.test https://app.example.test
 ```
+
+For applications hosted separately from One, use the [Git handoff and operator
+workflow](registration-workflow.md) to package, reconcile, review and apply
+public requests.

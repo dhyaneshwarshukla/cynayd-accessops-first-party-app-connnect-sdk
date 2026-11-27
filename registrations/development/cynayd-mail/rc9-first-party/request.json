@@ -1,0 +1,34 @@
+{
+  "appSlug": "cynayd-mail",
+  "assertion": {
+    "kid": "cynayd-mail-host-rsa-20261127",
+    "notAfter": "2027-02-25T13:10:31.943Z",
+    "notBefore": "2026-11-27T13:10:31.943Z",
+    "publicJwk": {
+      "e": "AQAB",
+      "kty": "RSA",
+      "n": "nxD7PbcX2qBf2phwPv4RV3-RnyNVPtOJE41j3ONDvBhfyHXACjKfzZj7ZfYk8itgTqxbVgFc1rPmz2pwMHdY1WW-L_CMMEBNwhZBd4bPURfeCn4Q_xaUp3qfFqlLpuJ5OGGdnNFOuoJzRcN6xlxlsEpLge5akiZmMRvLlW5MVeg0fi0rmXqfincSpyKLHG5OdL5JJQSojwtNlRKOD05R81NEGbWHTpdNXlhU7rSr0os5MLwGr8LxGOhFI9znO-AbJsGSdgrF1zpSVOTcvDCngaHwQPTDLX4Yi76yGpd2dj8iyA6l8Wd0xzPRZYFBVcmmLDwHV_-goryhIkZ-dQgUzEMeNtr0noqJ-Lq1sMqQLP0iMZcWXw4YPc1Ktp55qJEwEsbpV2q96VfV8iI-saADKyr9eczDaiiqCD6gB9qtpAul1XsjdFDpZlYwsqS4eISb0a71vr5B3zNtMNztge8N56Kt_qWgpx_iALIh9Il5p7MzKm5x3qyA3ZUSInPxPeHx"
+    }
+  },
+  "client": {
+    "audiences": [],
+    "scopes": []
+  },
+  "clientId": "cynayd-mail-host",
+  "grants": [],
+  "installations": [
+    {
+      "installationId": "243dac4c-85c6-48aa-bb8b-8bc97e2b6f82",
+      "organizationId": "cmiktjw42000rupjsnjgv89kb"
+    }
+  ],
+  "mode": "create",
+  "profile": {
+    "callback": "https://mail.cynayd.com/api/auth/one/callback",
+    "landing": "https://mail.cynayd.com/",
+    "proofThumbprints": [
+      "GbD0qu0RoE2jIMLlZS-f8wLGszinEh7z2EhA3PmfdsQ"
+    ]
+  },
+  "version": 1
+}
