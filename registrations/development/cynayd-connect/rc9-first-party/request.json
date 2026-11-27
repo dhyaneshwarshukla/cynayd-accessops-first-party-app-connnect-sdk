@@ -1,0 +1,34 @@
+{
+  "appSlug": "cynayd-connect",
+  "assertion": {
+    "kid": "cynayd-connect-rsa-20261127-3dcb31e2d6",
+    "notAfter": "2027-11-27T15:30:44.000000Z",
+    "notBefore": "2026-11-27T14:30:44.000000Z",
+    "publicJwk": {
+      "e": "AQAB",
+      "kty": "RSA",
+      "n": "swl_lj91hNMYqF8VuWMYVjoZQYT3DYnow8Hn9u00-yURzZ2uRFvyqNsBSHTLcfI54tUcXX9z-rFL3-TN3yTX4SC0JMfLhq7bPQskxiNCJsDBt9pUW0-qQ5bw4lCxY0t4kIyCA_b7_FkFzpmJT8-LwZcf8rPp4UvBCFVjzXnnIzLzFnD6-t7C4aycSdTJBIOFOOQm8np0AMNhxTcarGRe_U8-KgsabTL6-N5-YRJa2u4X6q1zzlRG4bhdhdU1494DSoD1K28LPW7tSe2M9Yyyy68b4r1USUI2V1lGHmy86og1OvA8cdnw-ZpxkkHKlOFLLFITz3U4G-3hZZ6AHWJpX8l9iCsknN9ZCEX8mQXLbdpec7M77-i4DlQmkVyvsq3ZAjMn_G-3RvmZ4hB0zQ5GSOPJ08cjUBg2WGr5xGUwUSpPOQ6GYXtFOgT1CKBebpWGdeyG6r9Uus5ilw6cFBsv9VAPur7s1mQZMTjPOrRF5PZfHJbVGf9e40HeO8KPLw2D"
+    }
+  },
+  "client": {
+    "audiences": [],
+    "scopes": []
+  },
+  "clientId": "cynayd-connect-backend",
+  "grants": [],
+  "installations": [
+    {
+      "installationId": "15fa91fc-0a37-49e6-93b5-6db36635995e",
+      "organizationId": "cmiktjw42000rupjsnjgv89kb"
+    }
+  ],
+  "mode": "create",
+  "profile": {
+    "callback": "https://connect2.cynayd.com/api/auth/one/callback",
+    "landing": "https://connect2.cynayd.com/",
+    "proofThumbprints": [
+      "Gl8rAkug31ea7LDYbenYH13oDUXIk4dpUpEg8ZXMYW8"
+    ]
+  },
+  "version": 1
+}
