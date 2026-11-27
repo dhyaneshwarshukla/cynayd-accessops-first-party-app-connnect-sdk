@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0-rc.7
+
+- Add the shared browser host-session client for status, launch, recovery and local logout.
+- Add a server operation for live bound-host validation, optional source renewal and current-evidence checks.
+- Reject non-string bound callback fields before consuming launch state.
+
+## 0.6.0-rc.6
+
+- Support confidential initial entry with the signed One subject as the identity source. Preserve existing host recovery binding checks.
+
 ## 0.6.0-rc.5
 
 - Negotiate optional renewal during confidential bound launch. Explicitly

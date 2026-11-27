@@ -56,7 +56,7 @@ function wireError(response: Response, body: Record<string, unknown>, requestId:
   let action: RecoveryAction = 'INVESTIGATE';
   if (response.status === 429 || response.status === 503 || body.nextAction === 'RETRY') action = 'RETRY';
   else if (code === 'ACCESS_DENIED' || code === 'access_denied' || body.nextAction === 'ACCESS_DENIED') action = 'ACCESS_DENIED';
-  else if (body.nextAction === 'UNLOCK' || code === 'session_locked') action = 'UNLOCK';
+  else if (body.nextAction === 'UNLOCK' || code === 'session_locked' || code === 'source_renewal_locked_unspent') action = 'UNLOCK';
   else if (['session_revoked', 'session_expired', 'step_up_required'].includes(code) || body.nextAction === 'REAUTHENTICATE' || body.nextAction === 'RECONNECT' ||
       ['VERIFIED_FEDERATION_EVIDENCE_REQUIRED', 'TOKEN_EXPIRED', 'AUTH_TOKEN_EPOCH', 'SESSION_EXPIRED',
         'ACCESS_EPOCH_STALE', 'access_epoch_stale', 'PIN_REQUIRED', 'MFA_ENROLLMENT_REQUIRED'].includes(code)) action = 'REAUTHENTICATE';

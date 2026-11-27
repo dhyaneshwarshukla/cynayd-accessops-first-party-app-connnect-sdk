@@ -28,4 +28,6 @@ var transport_1 = require("./delegation/transport");
 Object.defineProperty(exports, "FirstPartyAuthError", { enumerable: true, get: function () { return transport_1.FirstPartyAuthError; } });
 var jwks_1 = require("./delegation/jwks");
 Object.defineProperty(exports, "oneSigningKeys", { enumerable: true, get: function () { return jwks_1.oneSigningKeys; } });
+__exportStar(require("./delegation/renewal"), exports);
+__exportStar(require("./delegation/lifecycle"), exports);
 //# sourceMappingURL=index.js.map

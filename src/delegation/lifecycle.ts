@@ -14,7 +14,7 @@ export async function withCentralSession<T>(
 }
 
 export type SessionEventType = 'SESSION_LOCKED' | 'SESSION_UNLOCKED' | 'SESSION_EXPIRED' |
-  'SESSION_REVOKED' | 'SESSION_LOGOUT' | 'CREDENTIAL_RENEWAL_REQUIRED';
+  'SESSION_REVOKED' | 'SESSION_LOGOUT' | 'SESSION_ACCESS_DENIED' | 'CREDENTIAL_RENEWAL_REQUIRED';
 
 export interface SessionEvent {
   type: SessionEventType;
@@ -104,7 +104,9 @@ export class SessionEventMonitor {
           this.emit(monitor, { type: error.code === 'session_revoked' ? 'SESSION_REVOKED' : 'SESSION_EXPIRED' });
           this.stop(key, monitor);
           return;
-        } else if (error.nextAction === 'REAUTHENTICATE') {
+        } else if (error.nextAction === 'ACCESS_DENIED') {
+          this.emit(monitor, { type: 'SESSION_ACCESS_DENIED' });
+        } else if (error.nextAction === 'REAUTHENTICATE' || error.upstreamError === 'invalid_grant') {
           this.emit(monitor, { type: 'CREDENTIAL_RENEWAL_REQUIRED' });
         }
       }

@@ -1,5 +1,12 @@
 # CYNAYD first-party authentication SDK
 
+In the CYNAYD apps workspace, use
+`sso/access-platform-cutover-backend/docs/authentication-architecture.md` as the
+canonical ownership and migration reference. Keep application integration in the
+shared SDK and its host adapter. The SDK implements transport and binding checks
+for One and AccessOps decisions. Do not add independent session, lock or
+authorization authority.
+
 - Use the installed package and the [versioned contract](docs/contract-v1.md) for interactive access. Obtain user provenance from One and preserve canonical AccessOps decisions and resource ACLs.
 - Treat registered application keys, resource audiences, installation IDs and scopes as operator-supplied values. Report missing registrations or grants before rollout.
 - Keep One user credentials, assertion keys and DPoP keys on the responsible backend. Use an atomic session revision check on reconnect and an atomic shared replay store at the resource.

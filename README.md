@@ -146,3 +146,5 @@ See [unified session v2](docs/unified-session-v2.md) for v0.5.0 activity reporti
 
 The [v0.6 candidate contract](docs/unified-session-v3.md) covers the opt-in
 Go-authoritative authentication activity path and staging acceptance.
+
+See the [common first-party host integration contract](docs/common-integration-v1.md) for new host integrations.

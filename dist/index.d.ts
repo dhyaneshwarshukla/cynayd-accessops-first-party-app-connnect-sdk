@@ -7,4 +7,6 @@ export * from './delegation/resource';
 export { FirstPartyAuthError } from './delegation/transport';
 export type { RecoveryAction, Transport } from './delegation/transport';
 export { oneSigningKeys } from './delegation/jwks';
+export * from './delegation/renewal';
+export * from './delegation/lifecycle';
 //# sourceMappingURL=index.d.ts.map

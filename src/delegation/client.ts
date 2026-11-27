@@ -177,6 +177,20 @@ export class DelegationClient {
 
   /** Use only after a policy-qualified interactive command has been accepted by the application backend. */
   async reportActivity(binding: DelegationBinding, operation: ActivityOperation, eventId: string, suppliedRequestId?: string) {
+    return this.sendActivity(binding, operation, eventId, suppliedRequestId);
+  }
+
+  /** Report explicit foreground input without requesting authentication-idle extension. */
+  async reportScreenInteraction(binding: DelegationBinding, eventId: string,
+    operation: 'screen.interaction' | 'screen.view' | 'screen.view.end' = 'screen.interaction') {
+    const result = await this.sendActivity(binding, operation, eventId);
+    if (result.authenticationIdleUpdated) {
+      throw new FirstPartyAuthError(503, 'UPSTREAM_PROFILE_MISMATCH', correlation(), 'INVESTIGATE');
+    }
+    return { accepted: result.accepted, updated: result.updated, viewing: result.viewing === true };
+  }
+
+  private async sendActivity(binding: DelegationBinding, operation: ActivityOperation | 'screen.interaction' | 'screen.view' | 'screen.view.end', eventId: string, suppliedRequestId?: string) {
     const requestId = correlation(suppliedRequestId);
     const endpoint = this.options.activityEndpoint;
     if (!endpoint) throw new FirstPartyAuthError(503, 'ACTIVITY_NOT_CONFIGURED', requestId, 'INVESTIGATE');
@@ -195,6 +209,7 @@ export class DelegationClient {
       throw new FirstPartyAuthError(503, 'UPSTREAM_PROFILE_MISMATCH', requestId, 'INVESTIGATE');
     }
     return { accepted: true as const, updated: result.updated,
+      ...(typeof result.viewing === 'boolean' ? { viewing: result.viewing } : {}),
       ...(result.authenticationIdleUpdated !== undefined ? { authenticationIdleUpdated: result.authenticationIdleUpdated } : {}) };
   }
 

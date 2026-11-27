@@ -344,7 +344,39 @@ test('bound callback cannot replace evidence after host logout or mismatched rev
   expect(store.replaceIfCurrent).toHaveBeenCalledWith('host-session', 'before-logout', expect.any(Object));
 });
 
-test.each(['success','lost response','overlapping leases'])('silent source rotation handles %s without replaying the old generation', async scenario => {
+test.each([true, false])('initial bound launch enforces the registered installation (%s)', async matches => {
+  const { client, session, expected } = await fixture();
+  const pending = await client.initiateBoundLaunch('https://connect.example.test/return');
+  const states = { consume: jest.fn().mockResolvedValue({
+    ...pending, initial: true, sessionId: 'host-session', revision: 'pending',
+    expected: { organizationId: expected.organizationId, installedAppId: matches ? expected.installedAppId : 'foreign' },
+  }) };
+  const store = { replaceIfCurrent: jest.fn().mockResolvedValue(true) };
+  const result = session.completeBoundLaunch({
+    request: pending.request, state: pending.state, code: pending.request,
+  }, states, store);
+  if (matches) {
+    await expect(result).resolves.toMatchObject({ ...expected, centralSessionId: 'one-session', accessEpoch: 5 });
+    expect(store.replaceIfCurrent).toHaveBeenCalledTimes(1);
+  } else {
+    await expect(result).rejects.toMatchObject({ code: 'SOURCE_BINDING_INVALID' });
+    expect(store.replaceIfCurrent).not.toHaveBeenCalled();
+  }
+});
+
+test('initial bound launch can obtain its tenant and installation from One redemption', async () => {
+  const { client, session, expected } = await fixture();
+  const pending = await client.initiateBoundLaunch('https://connect.example.test/return');
+  const states = { consume: jest.fn().mockResolvedValue({
+    ...pending, initial: true, sessionId: 'host-session', revision: 'pending',
+  }) };
+  const store = { replaceIfCurrent: jest.fn().mockResolvedValue(true) };
+  await expect(session.completeBoundLaunch({
+    request: pending.request, state: pending.state, code: pending.request,
+  }, states, store)).resolves.toMatchObject({ ...expected, centralSessionId: 'one-session', accessEpoch: 5 });
+});
+
+test.each(['success','lost response','overlapping leases','locked before rotation'])('silent source rotation handles %s without replaying the old generation', async scenario => {
   const lose = scenario === 'lost response';
   const { client, session, expected, status } = await fixture();
   const pending = await client.initiateBoundLaunch('https://connect.example.test/return');
@@ -365,6 +397,15 @@ test.each(['success','lost response','overlapping leases'])('silent source rotat
   status.loseRenewalResponse = lose;
   const renew = () => session.renewBoundSession(binding.sessionId,store,coordinator);
   const request = jest.spyOn(client,'renewSource');
+  if (scenario === 'locked before rotation') {
+    request.mockRejectedValueOnce(new sdk.FirstPartyAuthError(403, 'source_renewal_locked_unspent', randomUUID(), 'UNLOCK'));
+    await expect(renew()).rejects.toMatchObject({ nextAction: 'UNLOCK' });
+    expect(stored.binding.capability).toEqual(binding.capability);
+    expect(stored.binding.renewalAttempt).toBeUndefined();
+    await expect(renew()).resolves.toMatchObject({ capability: { generation: 2 } });
+    expect(request).toHaveBeenCalledTimes(2);
+    return;
+  }
   const renewal = renew();
   if (scenario === 'overlapping leases') {
     const results = await Promise.allSettled([renewal,renew()]);
@@ -408,4 +449,40 @@ test('mandatory bound renewal still requires a valid capability', async () => {
   await expect(client.redeemBoundLaunch({
     ...pending, expectedState: pending.state, code: pending.request, renewal: true,
   })).rejects.toMatchObject({ code: 'UPSTREAM_PROFILE_MISMATCH' });
+});
+
+test('protected host validation checks One and rejects evidence replaced during that check', async () => {
+  const { client, session, expected } = await fixture();
+  const pending = await client.initiateBoundLaunch('https://connect.example.test/return');
+  const { subject } = await client.redeemBoundLaunch({
+    ...pending, code: pending.request, expectedState: pending.state,
+  });
+  const binding = { ...expected, appSlug: 'cynayd-connect', accessEpoch: 5, centralSessionId: 'one-session',
+    sessionId: 'host-session', subject, expiresAt: Date.now() + 60_000 };
+  const store = {
+    load: jest.fn().mockResolvedValue({ revision: 'current', binding }),
+    replaceIfCurrent: jest.fn(),
+  };
+  const status = jest.spyOn(client, 'sessionStatus');
+  await expect(session.activeBoundSession(binding, store)).resolves.toEqual(binding);
+  expect(status).toHaveBeenCalledTimes(1);
+  store.load.mockResolvedValue({ revision: 'changed', binding: { ...binding, renewalAttempt: 'started' } });
+  await expect(session.activeBoundSession(binding, store)).rejects.toMatchObject({ code: 'SOURCE_SESSION_ADVANCED', nextAction: 'RETRY' });
+  expect(status).toHaveBeenCalledTimes(2);
+});
+
+test('the relay invalidates browser status when AccessOps denies continued access', async () => {
+  const { binding } = await fixture();
+  const monitor = new sdk.SessionEventMonitor({
+    sessionStatus: async () => { throw new sdk.FirstPartyAuthError(403, 'access_denied', 'fixture', 'ACCESS_DENIED'); },
+  });
+  let close = () => {};
+  const invalidated = new Promise<sdk.SessionEvent>(resolve => {
+    close = monitor.subscribe(binding.sessionId, async () => binding, resolve);
+  });
+  try {
+    await expect(invalidated).resolves.toEqual({ type: 'SESSION_ACCESS_DENIED' });
+  } finally {
+    close();
+  }
 });

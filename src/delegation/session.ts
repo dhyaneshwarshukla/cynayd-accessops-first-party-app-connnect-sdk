@@ -54,9 +54,15 @@ export interface BoundLaunchState extends LaunchState {
   accessEpoch: number;
 }
 
-/** Consume only a transaction bound to the initiating authenticated host browser. */
+/** Initial entry learns the identity and installation from confidential redemption. */
+export interface InitialBoundLaunchState extends Pick<BoundLaunchState, 'sessionId' | 'revision' | 'request' | 'verifier' | 'renewal'> {
+  initial: true;
+  expected?: Pick<SessionIdentity, 'organizationId' | 'installedAppId'>;
+}
+
+/** Consume only a transaction bound to the initiating host browser. */
 export interface BoundLaunchStateStore {
-  consume(state: string): Promise<BoundLaunchState | undefined>;
+  consume(state: string): Promise<BoundLaunchState | InitialBoundLaunchState | undefined>;
 }
 
 export interface BoundDelegationBinding extends SessionIdentity {
@@ -160,25 +166,32 @@ export class OneApplicationSession {
     store: BoundDelegationStore, suppliedRequestId?: string): Promise<BoundDelegationBinding> {
     const requestId = correlation(suppliedRequestId);
     const opaque = /^[A-Za-z0-9_-]{43}$/;
-    if (![input.code, input.request, input.state].every(value => opaque.test(value))) {
+    if (![input.code, input.request, input.state].every(value => typeof value === 'string' && opaque.test(value))) {
       reauthenticate(requestId, 'LAUNCH_STATE_INVALID');
     }
     let state;
     try { state = await states.consume(input.state); }
     catch { throw new FirstPartyAuthError(503, 'LAUNCH_STATE_UNAVAILABLE', requestId, 'RETRY'); }
     if (!state || state.request !== input.request || !state.sessionId || !state.revision ||
-        !state.centralSessionId || !Number.isSafeInteger(state.accessEpoch) || state.accessEpoch < 1) {
+        (state.expected && (!state.expected.organizationId || !state.expected.installedAppId))) {
       reauthenticate(requestId, 'LAUNCH_STATE_INVALID');
     }
+    const existing = 'centralSessionId' in state ? state : undefined;
+    if (existing && (!existing.expected?.userId || !existing.centralSessionId ||
+        !Number.isSafeInteger(existing.accessEpoch) || existing.accessEpoch < 1)) {
+      reauthenticate(requestId, 'LAUNCH_STATE_INVALID');
+    }
+    if (!existing && (!('initial' in state) || state.initial !== true)) reauthenticate(requestId, 'LAUNCH_STATE_INVALID');
     const { subject, capability } = await this.options.delegation.redeemBoundLaunch({
       ...input, verifier: state.verifier, expectedState: input.state, renewal:state.renewal,
     }, requestId);
     const claims = await this.verifySubject(subject, state.expected, requestId);
-    if (claims.sessionBinding.sessionId !== state.centralSessionId || claims.launchAccessEpoch !== state.accessEpoch) {
+    if (existing && (claims.sessionBinding.sessionId !== existing.centralSessionId || claims.launchAccessEpoch !== existing.accessEpoch)) {
       reauthenticate(requestId, 'SOURCE_BINDING_CHANGED');
     }
-    const binding = { ...state.expected, sessionId: state.sessionId, centralSessionId: state.centralSessionId,
-      appSlug: this.options.appSlug, accessEpoch: state.accessEpoch, subject,
+    const binding = { userId: claims.sub, organizationId: claims.organizationId, installedAppId: claims.installedAppId,
+      sessionId: state.sessionId, centralSessionId: claims.sessionBinding.sessionId,
+      appSlug: this.options.appSlug, accessEpoch: claims.launchAccessEpoch, subject,
       expiresAt: Math.min(claims.exp!, claims.sessionBinding.expiresAt) * 1000, ...(capability ? {capability} : {}) };
     if (binding.expiresAt <= Date.now()) reauthenticate(requestId, 'SOURCE_SESSION_EXPIRED');
     let stored;
@@ -186,6 +199,34 @@ export class OneApplicationSession {
     catch { throw new FirstPartyAuthError(503, 'CREDENTIAL_STORE_UNAVAILABLE', requestId, 'RETRY'); }
     if (!stored) reauthenticate(requestId, 'SOURCE_SESSION_CHANGED');
     return binding;
+  }
+
+  /** Validate a host snapshot before a protected operation, optionally rotating eligible evidence. */
+  async activeBoundSession(binding: BoundDelegationBinding, store: RenewableDelegationStore,
+    coordinator?: SourceRenewalCoordinator, suppliedRequestId?: string): Promise<BoundDelegationBinding> {
+    const requestId = correlation(suppliedRequestId);
+    if (!binding.sessionId || binding.appSlug !== this.options.appSlug) {
+      reauthenticate(requestId, 'SOURCE_BINDING_INVALID');
+    }
+    const leadMs = 30_000;
+    const current = coordinator && (binding.capability || binding.renewalAttempt) &&
+      binding.expiresAt - Date.now() <= leadMs
+      ? await this.renewBoundSession(binding.sessionId, store, coordinator, leadMs, requestId)
+      : binding;
+    if (current.userId !== binding.userId || current.organizationId !== binding.organizationId ||
+        current.installedAppId !== binding.installedAppId || current.centralSessionId !== binding.centralSessionId ||
+        current.accessEpoch !== binding.accessEpoch) {
+      reauthenticate(requestId, 'SOURCE_BINDING_CHANGED');
+    }
+    await this.options.delegation.sessionStatus(current, requestId);
+    let latest;
+    try { latest = await store.load(binding.sessionId); }
+    catch { throw new FirstPartyAuthError(503, 'CREDENTIAL_STORE_UNAVAILABLE', requestId, 'RETRY'); }
+    if (!latest) reauthenticate(requestId, 'SOURCE_SESSION_CHANGED');
+    if (latest.binding.subject !== current.subject || latest.binding.renewalAttempt !== current.renewalAttempt) {
+      throw new FirstPartyAuthError(503, 'SOURCE_SESSION_ADVANCED', requestId, 'RETRY');
+    }
+    return current;
   }
 
   async renewBoundSession(sessionId: string, store: RenewableDelegationStore, coordinator: SourceRenewalCoordinator,
@@ -212,6 +253,7 @@ export class OneApplicationSession {
       if (!binding.capability) throw new FirstPartyAuthError(401,'SOURCE_CAPABILITY_REQUIRED',requestId,'REAUTHENTICATE');
       const { capability, ...evidence } = binding;
       const renewalAttempt = randomUUID();
+      let claimedRevision: string | undefined;
       try {
         if (!await store.replaceIfCurrent(sessionId,revision,{ ...evidence,renewalAttempt })) {
           reauthenticate(requestId,'SOURCE_SESSION_CHANGED');
@@ -220,6 +262,7 @@ export class OneApplicationSession {
         if (claimed.binding.renewalAttempt !== renewalAttempt || claimed.revision === revision) {
           reauthenticate(requestId,'SOURCE_SESSION_CHANGED');
         }
+        claimedRevision = claimed.revision;
         const next = await this.options.delegation.renewSource(capability,requestId);
         const claims = await this.verifySubject(next.subject,binding,requestId);
         if (claims.sessionBinding.sessionId !== binding.centralSessionId || claims.launchAccessEpoch !== binding.accessEpoch) {
@@ -233,6 +276,13 @@ export class OneApplicationSession {
         if (!await store.replaceIfCurrent(sessionId,claimed.revision,replacement)) reauthenticate(requestId,'SOURCE_SESSION_CHANGED');
         return replacement;
       } catch (error) {
+        if (claimedRevision && error instanceof FirstPartyAuthError && error.code === 'source_renewal_locked_unspent') {
+          let restored = false;
+          try { restored = await store.replaceIfCurrent(sessionId, claimedRevision, binding); }
+          catch { /* Preserve the attempt marker for verified recovery. */ }
+          if (restored) throw error;
+          throw new FirstPartyAuthError(409,'SOURCE_RENEWAL_RECOVERY_REQUIRED',requestId,'REAUTHENTICATE');
+        }
         if (error instanceof FirstPartyAuthError &&
             (error.code === 'SOURCE_SESSION_CHANGED' || ['UNLOCK','REAUTHENTICATE','ACCESS_DENIED'].includes(error.nextAction))) {
           throw error;
@@ -248,7 +298,8 @@ export class OneApplicationSession {
     throw new FirstPartyAuthError(503,'SOURCE_RENEWAL_IN_PROGRESS',requestId,'RETRY');
   }
 
-  private async verifySubject(subject: string, expected: SessionIdentity, requestId: string): Promise<SubjectClaims> {
+  private async verifySubject(subject: string, expected: (Pick<SessionIdentity, 'organizationId' | 'installedAppId'> &
+    Partial<Pick<SessionIdentity, 'userId'>>) | undefined, requestId: string): Promise<SubjectClaims> {
     let header;
     try { header = decodeHeader(subject); } catch { reauthenticate(requestId); }
     if (header.typ !== 'at+jwt' || header.alg !== 'RS256' || !header.kid) reauthenticate(requestId);
@@ -260,8 +311,12 @@ export class OneApplicationSession {
     try { claims = verifyJwt(subject, signingKey, this.options.issuer, this.options.appSlug) as SubjectClaims; }
     catch { reauthenticate(requestId); }
     if (claims.type !== 'one_delegation_subject' || claims.appSlug !== this.options.appSlug ||
-        claims.sub !== expected.userId || claims.id !== expected.userId || claims.organizationId !== expected.organizationId ||
-        claims.installedAppId !== expected.installedAppId || !Number.isSafeInteger(claims.launchAccessEpoch) ||
+        typeof claims.sub !== 'string' || !claims.sub || claims.id !== claims.sub ||
+        typeof claims.organizationId !== 'string' || !claims.organizationId ||
+        typeof claims.installedAppId !== 'string' || !claims.installedAppId ||
+        (expected && ((expected.userId !== undefined && claims.sub !== expected.userId) ||
+          claims.organizationId !== expected.organizationId || claims.installedAppId !== expected.installedAppId)) ||
+        !Number.isSafeInteger(claims.launchAccessEpoch) ||
         claims.launchAccessEpoch < 1 || !claims.sessionBinding?.sessionId ||
         !claims.sessionBinding.reference || claims.launchJti !== claims.sessionBinding.reference ||
         !Number.isSafeInteger(claims.sessionBinding.originalIat) || !Number.isSafeInteger(claims.sessionBinding.expiresAt)) {

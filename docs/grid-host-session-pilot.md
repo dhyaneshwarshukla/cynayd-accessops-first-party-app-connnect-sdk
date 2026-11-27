@@ -1,72 +1,44 @@
-# Grid host-session pilot
+# Grid and Calendar host-session qualification
 
-Grid pins SDK 0.6.0-rc.4 from commit
-`5df357cb191890c22701925e91d0957e1ff94343`. The Grid host-session commit is `adb368b3ad91c30f86b0c54da8145b78b0386b59`
-and the activity and save-recovery commit is
-`303e2d2d0d56b1160d06a02d9932f11e5450ad04`. Its migration is
-`apps/api/prisma/migrations/20261125193000_one_host_sessions/migration.sql`.
+Use the canonical ownership manifest at
+`sso/access-platform-cutover-backend/docs/authentication-architecture.md`
+when working in the CYNAYD application workspace.
 
-## Isolated configuration
+## Grid release state
 
-- Serve Grid and the Grid API on one HTTPS origin with `/api` routed to
-  the Grid backend. Configure the web build's `NEXT_PUBLIC_API_BASE_URL`
-  for that origin and `NEXT_PUBLIC_ONE_ORIGIN` for the trusted One portal.
-  Existing split-origin deployments need a reviewed routing change before
-  this pilot. Grid's `deployments/isolated-one-pilot.nginx.conf` is a tested
-  loopback ingress fixture. Use the same exact callback and SSE routing in
-  an approved staging ingress, with callback query redaction.
-- Pin `SHEETS_ONE_GRID_ORIGIN`, `SHEETS_ONE_PORTAL_ORIGIN`,
-  `ONE_DELEGATION_ISSUER`, `SHEETS_ONE_JWKS_URL`, and the registered
-  `APP_SLUG`. Use the existing server-side assertion and proof key
-  configuration. Register the exact HTTPS callback under
-  `SHEETS_ONE_BOUND_CALLBACK`, ending in `/api/auth/one/callback`. Redact
-  callback queries in every proxy, application log, and analytics layer.
-- Apply the migration only to the isolated target database. Set a random
-  32-byte base64url `SHEETS_ONE_SESSION_SEAL_KEY` consistently across Grid
-  replicas. Rotating this key requires invalidating existing Grid host sessions.
-  Have the database owner schedule expired-row deletion before sustained traffic.
-- The local session entry points require
-  `ONE_DELEGATION_ENABLED=true`, `SHEETS_ONE_SESSION_STATUS_ENABLED=true`
-  and `SHEETS_ONE_HOST_SESSION_ENABLED=true`. Use the existing authenticated
-  Grid session as the prerequisite for starting the confidential launch.
-- Keep `SHEETS_ONE_SOURCE_RENEWAL_ENABLED` off outside the independently
-  approved pilot. Renewal also requires the exact
-  `SHEETS_ONE_RENEWAL_TENANT_ID` and `SHEETS_ONE_RENEWAL_INSTALLATION_ID`.
-  One must independently approve the same registered client/installation and
-  assurance policy. Unsupported authority modes retain their verified recovery
-  path. Reauth flows must never establish a local session from the bound
-  redemption response alone.
+Development Grid uses SDK RC.7 for confidential direct entry. The signed
+One subject establishes the initial host identity after live AccessOps
+authorization. Existing host recovery checks the original user, organization,
+installation, central session and access epoch. See the
+[Phase 4 rollout record](../../sso/access-platform-cutover-backend/docs/grid-phase-4-rollout.md)
+for deployment and remaining qualification. Grid bearer compatibility stays
+available while its consumers and retirement evidence are reviewed.
 
-## Grid behavior and acceptance
+## Grid deployment and checks
 
-The launch cookie is separate from the established host cookie. The database
-stores a cookie digest, a revision, encrypted state and credentials, and a
-bounded renewal lease. The store consumes launch state via compare-and-set.
-The SDK checks the existing user, tenant, installation, One session and epoch
-before storing replacement evidence. Guarded requests get a live One status
-decision and retain existing workbook and downstream Drive authorization.
-The relay emits advisory hints only. Each browser reconciliation checks
-current status again. Lock state can be displayed without unmounting an
-already open workbook, and the user unlocks in One.
-
-Exercise start, consent, exact callback, replay rejection, lock/recovery,
-logout with a concurrent renewal, an expired lease, Drive read and write, and
-return to the intended workbook. The PostgreSQL fixture tests two store
-instances, launch consumption, revision advancement, lease exclusion and
-logout racing a credential replacement. A browser pilot must additionally
-verify pending edits and ambiguous action reconciliation. The Grid checkout
-did not expose a separate WebSocket gateway in the API source reviewed.
-Qualify any independently deployed collaboration transport separately. The Grid activity adapter is independently switched with
-`SHEETS_ONE_SPREADSHEET_ACTIVITY_ENABLED`,
-`SHEETS_ONE_ACTIVITY_TENANT_ID`, and `SHEETS_ONE_ACTIVITY_INSTALLATION_ID`.
-Keep it disabled until approval. Only a newly committed single-cell edit on
-the protocol 2 route can report. A short-lived in-memory hint from the viewport
-editor narrows eligible operations. One still checks the bound application
-client, session, installation, operation policy, and idle-extension policy.
-The hint alone does not establish user presence. Restored edits, receipt
-replays, heartbeat and autosave do not report. Activity failure cannot
-fail or repeat the accepted write. Recovery after central unlock looks up
-stored receipts before scheduling any still-pending writes.
+- Serve Grid and its API on the same HTTPS origin. Route `/api` to the
+  Grid backend and configure the web API base and trusted One portal
+  origin. Validate the exact registered callback, issuer and JWKS origin.
+  Redact callback queries from proxy logs, application logs and analytics.
+- Use the existing backend assertion and proof keys and apply the
+  `20261125193000_one_host_sessions` migration only in the approved
+  target environment. Configure the same session seal key on all Grid
+  replicas. Plan session invalidation for key rotation.
+- Scope the host rollout to the authorized installation during
+  qualification. Grid requests optional renewal when the existing
+  Grid renewal switch is enabled. One checks the live central session,
+  lock and AccessOps authorization. Go decides continuing assurance.
+  Keep the separate activity operation and authentication-idle policy
+  checks at One and Go, with Grid reporting only eligible committed
+  foreground work.
+- Verify direct workbook entry and My Apps entry with a disposable
+  authorized account. Ensure no browser bearer or consent is used for
+  approved first-party entry. Exercise exact callback and replay rejection,
+  central lock and unlock, source expiry, renewal races, logout and pending
+  edit reconciliation under the same identity.
+- Retire Grid browser bearer consumers only after these checks pass in the
+  deployed candidate. Keep shared SSO and SDK interfaces for their
+  remaining consumers. Roll back with the pinned prior image.
 
 ## PHP and Python adapter boundary
 
