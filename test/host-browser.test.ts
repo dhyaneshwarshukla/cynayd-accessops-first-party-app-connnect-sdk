@@ -40,3 +40,30 @@ it('deduplicates concurrent launch and suppresses another automatic redirect', a
     Reflect.deleteProperty(globalThis, 'window');
   }
 });
+
+it('suppresses automatic launch after explicit logout across same-origin tabs', async () => {
+  const values = new Map<string, string>();
+  Object.defineProperties(globalThis, {
+    window: { value: { location: { replace: jest.fn() } }, configurable: true },
+    localStorage: { value: {
+      getItem: (key: string) => values.get(key),
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    }, configurable: true },
+  });
+  const options = { basePath: '/api/auth/one', oneOrigin: () => 'https://one.example.test',
+    storageKey: 'logout-test', rememberLogout: true };
+  const fetch = jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(null, { status: 204 }))
+    .mockResolvedValueOnce(respond(200, { authorizationUrl: callback }));
+  try {
+    await createHostSessionBrowser(options).logout();
+    const otherTab = createHostSessionBrowser(options);
+    await expect(otherTab.launch(true, '/')).resolves.toBe(false);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await expect(otherTab.launch(false, '/')).resolves.toBe(true);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  } finally {
+    Reflect.deleteProperty(globalThis, 'window');
+    Reflect.deleteProperty(globalThis, 'localStorage');
+  }
+});

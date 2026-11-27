@@ -1,0 +1,5 @@
+{
+  "kind": "first-party-client",
+  "clientId": "example-app-backend",
+  "profile": { "state": "disabled" }
+}

@@ -1,0 +1,10 @@
+{
+  "kind": "grant",
+  "organizationId": "replace-with-approved-tenant",
+  "clientId": "example-app-backend",
+  "audience": "example-resource",
+  "sourceInstallationId": "replace-with-source-installation",
+  "targetInstallationId": "replace-with-target-installation",
+  "scopes": ["example:authorized-operation"],
+  "validUntil": "REPLACE_WITH_APPROVED_EXPIRY"
+}

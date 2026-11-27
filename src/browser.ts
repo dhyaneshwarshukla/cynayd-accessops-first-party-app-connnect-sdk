@@ -96,6 +96,8 @@ export interface HostSessionBrowserOptions {
   storageKey: string;
   /** Transitional host response code for a missing cookie. */
   missingCookieCode?: string;
+  /** Suppress automatic entry after explicit local logout until a user starts launch. */
+  rememberLogout?: boolean;
 }
 
 /** Same-origin browser transport for a confidential first-party host. */
@@ -106,6 +108,8 @@ export function createHostSessionBrowser(options: HostSessionBrowserOptions) {
   const { basePath, storageKey, missingCookieCode = 'HOST_SESSION_REQUIRED' } = options;
   let launchInProgress: Promise<boolean> | undefined;
   let lastAttempt = 0;
+  let signedOut = false;
+  const logoutKey = storageKey + '-signed-out';
 
   function clearLaunchAttempt() {
     lastAttempt = 0;
@@ -151,10 +155,22 @@ export function createHostSessionBrowser(options: HostSessionBrowserOptions) {
     const response = await fetch(basePath + '/logout', { method: 'POST', redirect: 'error' });
     if (!response.ok) throw new Error('Could not close the application session');
     suppressAutomaticLaunch();
+    if (options.rememberLogout) {
+      signedOut = true;
+      try { localStorage.setItem(logoutKey, 'true'); } catch { /* Storage can be disabled. */ }
+    }
   }
 
   function launch(automatic: boolean, returnTo = window.location.pathname + window.location.search): Promise<boolean> {
     if (launchInProgress) return launchInProgress;
+    if (options.rememberLogout) {
+      try { signedOut = localStorage.getItem(logoutKey) === 'true'; } catch { /* Storage can be disabled. */ }
+      if (automatic && signedOut) return Promise.resolve(false);
+      if (!automatic) {
+        signedOut = false;
+        try { localStorage.removeItem(logoutKey); } catch { /* Storage can be disabled. */ }
+      }
+    }
     if (automatic && Date.now() - launchAttemptTime() < 120_000) return Promise.resolve(false);
     suppressAutomaticLaunch();
     launchInProgress = (async () => {
@@ -199,4 +215,36 @@ export function createHostSessionBrowser(options: HostSessionBrowserOptions) {
   }
 
   return { status, logout, launch, reportScreenInteraction, unlockFrameUrl, clearLaunchAttempt, suppressAutomaticLaunch };
+}
+
+/** Mount One's modal unlock. Frame messages only request a fresh host status check. */
+export function mountCentralUnlock(container: HTMLElement, url: URL, revalidate: () => void) {
+  if (url.protocol !== 'https:' || url.pathname !== '/workspace-unlock' || url.search ||
+      url.username || url.password || !/^#[A-Za-z0-9_-]{43}$/.test(url.hash)) {
+    throw new Error('Invalid One unlock URL');
+  }
+  const origin = url.origin;
+  const dialog = document.createElement('dialog');
+  dialog.setAttribute('aria-label', 'Unlock CYNAYD');
+  const frame = document.createElement('iframe');
+  frame.src = url.href;
+  frame.title = 'Unlock CYNAYD';
+  frame.referrerPolicy = 'no-referrer';
+  frame.style.cssText = 'width:100%;height:100%;border:0';
+  dialog.style.cssText = 'padding:0;width:100%;height:100%;max-width:none;max-height:none';
+  dialog.append(frame);
+  dialog.addEventListener('cancel', event => event.preventDefault());
+  const onMessage = (event: MessageEvent) => {
+    if (event.origin === origin && event.source === frame.contentWindow && event.data === 'cynayd-unlock-revalidate') {
+      revalidate();
+    }
+  };
+  container.append(dialog);
+  try { dialog.showModal(); }
+  catch (error) { dialog.remove(); throw error; }
+  window.addEventListener('message', onMessage);
+  return () => {
+    window.removeEventListener('message', onMessage);
+    dialog.remove();
+  };
 }

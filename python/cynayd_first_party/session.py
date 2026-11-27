@@ -2,6 +2,9 @@
 
 from dataclasses import dataclass, field
 from time import time
+from inspect import isawaitable
+
+import jwt
 from typing import Callable, Literal, Protocol
 from uuid import uuid4
 
@@ -26,6 +29,19 @@ class RotationStore(Protocol):
     async def replace(self, session_id: str, revision: str, credentials: Credentials) -> bool: ...
 
 
+class HostStore(RotationStore, Protocol):
+    """Durable launch state, transaction consumption, activation and local logout."""
+
+    async def create_launch(self, token: str, pending: dict, seconds: int) -> None: ...
+    async def consume_launch(
+        self, token: str, *, request: str, state: str, prior_id: str | None,
+    ) -> tuple[object, dict] | None: ...
+    async def activate(
+        self, token: str, revision: object, credentials: Credentials, prior: tuple[str, str] | None,
+    ) -> bool: ...
+    async def remove(self, tokens: list[str]) -> None: ...
+
+
 def _identity_tuple(identity: SubjectIdentity):
     return (identity.user_id, identity.tenant_id, identity.installation_id,
             identity.central_session_id, identity.access_epoch)
@@ -44,13 +60,24 @@ class OneApplicationSession:
         self._app_slug = app_slug
         self._signing_key = signing_key
 
-    def _verify(self, redemption: Redemption) -> Credentials:
+    async def _verify(self, redemption: Redemption) -> Credentials:
         try:
+            if not redemption.subject or len(redemption.subject) > 32768:
+                raise ValueError()
+            header = jwt.get_unverified_header(redemption.subject)
+            kid = header.get("kid")
+            if header.get("alg") != "RS256" or not isinstance(kid, str) or not kid or (
+                set(header) & {"crit", "jku", "x5u"}
+            ):
+                raise ValueError()
+            key = self._signing_key(kid)
+            if isawaitable(key):
+                key = await key
             identity = verify_subject(
                 redemption.subject, issuer=self._issuer, app_slug=self._app_slug,
-                signing_key=self._signing_key,
+                signing_key=lambda _: key,
             )
-        except ValueError:
+        except (ValueError, jwt.PyJWTError):
             raise _changed() from None
         return Credentials(identity, redemption.subject, redemption.capability)
 
@@ -58,9 +85,12 @@ class OneApplicationSession:
         self, launch: Launch, *, request: str, code: str, state: str,
         expected: SubjectIdentity | None = None,
         installation_for_tenant: Callable[[str], str | None],
+        renewal: bool = True,
     ) -> Credentials:
         """Call with a consumed transaction before atomically committing the host session."""
-        credentials = self._verify(await self.client.redeem(launch, request=request, code=code, state=state))
+        redemption = await self.client.redeem(launch, request=request, code=code, state=state,
+                                              **({} if renewal else {"renewal": False}))
+        credentials = await self._verify(redemption)
         identity = credentials.identity
         if installation_for_tenant(identity.tenant_id) != identity.installation_id or (
             expected is not None and _identity_tuple(expected) != _identity_tuple(identity)
@@ -85,14 +115,16 @@ class OneApplicationSession:
             if claim != "claimed":
                 # Another worker may have completed rotation. Never resubmit its capability.
                 latest = await store.read(session_id)
-                if latest is None or latest[0] == revision:
+                if latest is None or latest[1] == credentials:
                     raise AuthorityError(503, "SOURCE_RENEWAL_PENDING", str(uuid4()), "RETRY")
+                if _identity_tuple(latest[1].identity) != _identity_tuple(credentials.identity):
+                    raise _changed()
                 revision, credentials = latest
             else:
                 if not claimed_revision or claimed_revision == revision:
                     raise _changed()
                 try:
-                    renewed = self._verify(await self.client.renew(capability))
+                    renewed = await self._verify(await self.client.renew(capability))
                 except AuthorityError as error:
                     if error.code == "source_renewal_locked_unspent":
                         if not await store.replace(session_id, claimed_revision, credentials):

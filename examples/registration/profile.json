@@ -1,0 +1,10 @@
+{
+  "kind": "first-party-client",
+  "clientId": "example-app-backend",
+  "profile": {
+    "state": "approved",
+    "callback": "https://app.example.test/api/auth/one/callback",
+    "landing": "https://app.example.test/",
+    "proofThumbprints": ["REPLACE_WITH_PUBLIC_PROOF_THUMBPRINT"]
+  }
+}

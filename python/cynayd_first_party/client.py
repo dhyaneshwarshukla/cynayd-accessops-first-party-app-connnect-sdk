@@ -7,6 +7,7 @@ import re
 from secrets import token_urlsafe
 from time import time
 from urllib.parse import urljoin
+from typing import Callable
 from uuid import uuid4
 
 import httpx
@@ -15,6 +16,7 @@ from .signer import DelegationSigner, _digest, _endpoint
 from .subject import SubjectIdentity
 
 _ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer"
+_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
 _SUBJECT_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 _OPAQUE = re.compile(r"[A-Za-z0-9_-]{43}")
 _EVENT = re.compile(r"[A-Za-z0-9_-]{16,128}")
@@ -30,6 +32,15 @@ class AuthorityError(Exception):
     def __init__(self, status: int, code: str, request_id: str, action: str = "INVESTIGATE"):
         super().__init__(code)
         self.status, self.code, self.request_id, self.action = status, code, request_id, action
+
+
+@dataclass(frozen=True)
+class RegisteredOperation:
+    audience: str
+    scopes: tuple[str, ...]
+    method: str
+    origin: str
+    allows_url: Callable[[httpx.URL], bool]
 
 
 @dataclass(frozen=True)
@@ -93,8 +104,8 @@ class DelegationClient:
     async def _post(self, operation, fields, request_id):
         endpoint = urljoin(self._endpoint, operation)
         try:
-            response = await self._http.post(
-                endpoint,
+            request = self._http.build_request(
+                "POST", endpoint,
                 data={
                     **fields,
                     "client_id": self._signer.client_id,
@@ -102,8 +113,11 @@ class DelegationClient:
                     "client_assertion": self._signer.assertion(endpoint),
                 },
                 headers={"DPoP": self._signer.proof("POST", endpoint), "X-Request-Id": request_id},
-                follow_redirects=False, timeout=10.0,
+                timeout=10.0,
             )
+            for name in ("Cookie", "Authorization", "Proxy-Authorization"):
+                request.headers.pop(name, None)
+            response = await self._http.send(request, auth=None, follow_redirects=False)
         except httpx.RequestError:
             raise AuthorityError(503, "UPSTREAM_UNAVAILABLE", request_id, "RETRY") from None
         try:
@@ -125,6 +139,57 @@ class DelegationClient:
     def _mismatch(request_id):
         return AuthorityError(503, "UPSTREAM_PROFILE_MISMATCH", request_id)
 
+    async def introspect(self, token: str, audience: str, request_id: str | None = None):
+        return await self._post("introspect", {"token": token, "audience": audience}, request_id or str(uuid4()))
+
+    async def call(self, subject, identity: SubjectIdentity, operation: RegisteredOperation, public_url: str,
+                   *, json=None, data=None, files=None, headers=None):
+        """Exchange server-held One evidence and call an explicitly registered product API."""
+        request_id = str(uuid4())
+        if not subject or identity.expires_at <= time():
+            raise AuthorityError(401, "SOURCE_SESSION_EXPIRED", request_id, "REAUTHENTICATE")
+        try:
+            url = _endpoint(public_url)
+            origin = _endpoint(operation.origin)
+        except (ValueError, httpx.InvalidURL):
+            raise AuthorityError(400, "INVALID_RESOURCE_URL", request_id) from None
+        if (origin.raw_path != b"/" or url.netloc != origin.netloc or not operation.allows_url(url)):
+            raise AuthorityError(400, "INVALID_RESOURCE_URL", request_id)
+        scopes = sorted(set(operation.scopes))
+        if (not operation.audience or not 0 < len(scopes) <= 32 or
+                any(not re.fullmatch(r"[a-z][a-z0-9_.:-]{1,127}", scope) for scope in scopes)):
+            raise AuthorityError(400, "INVALID_OPERATION_REGISTRATION", request_id)
+        started = time()
+        result = await self._post(self._endpoint, {
+            "grant_type": _EXCHANGE_GRANT, "subject_token_type": _SUBJECT_TYPE,
+            "requested_token_type": _SUBJECT_TYPE, "subject_token": subject,
+            "audience": operation.audience, "scope": " ".join(scopes),
+        }, request_id)
+        token, expires, scope = (result.get(field) for field in ("access_token", "expires_in", "scope"))
+        if (result.get("token_type") != "DPoP" or result.get("issued_token_type") != _SUBJECT_TYPE
+                or not isinstance(token, str) or not token or any(ch.isspace() for ch in token)
+                or type(expires) is not int or not 0 < expires <= 300
+                or not isinstance(scope, str) or sorted(scope.split(" ")) != scopes):
+            raise self._mismatch(request_id)
+        if min(identity.expires_at, started + expires) <= time():
+            raise AuthorityError(401, "DELEGATION_CREDENTIAL_EXPIRED", request_id, "RETRY")
+        request = self._http.build_request(operation.method, url, json=json, data=data, files=files,
+                                           headers=headers, timeout=10.0)
+        for name in list(request.headers):
+            if name in ("cookie", "host", "forwarded", "proxy-authorization") or name.startswith("x-forwarded-"):
+                del request.headers[name]
+        request.headers["Host"] = url.netloc.decode("ascii")
+        request.headers["Authorization"] = "DPoP " + token
+        request.headers["DPoP"] = self._signer.proof(operation.method, str(url), token)
+        request.headers["X-Request-Id"] = request_id
+        try:
+            response = await self._http.send(request, auth=None, follow_redirects=False)
+        except httpx.RequestError:
+            raise AuthorityError(503, "UPSTREAM_UNAVAILABLE", request_id, "RETRY") from None
+        if response.is_redirect:
+            raise AuthorityError(502, "UPSTREAM_REDIRECT_DENIED", request_id)
+        return response
+
     async def initiate(self, callback: str) -> Launch:
         _endpoint(callback)
         verifier, state = token_urlsafe(32), token_urlsafe(32)
@@ -137,7 +202,7 @@ class DelegationClient:
             raise self._mismatch(request_id)
         return Launch(result["request"], state, verifier, expires)
 
-    async def redeem(self, launch: Launch, *, request: str, code: str, state: str) -> Redemption:
+    async def redeem(self, launch: Launch, *, request: str, code: str, state: str, renewal: bool = True) -> Redemption:
         """Call after atomically consuming the transaction owned by the browser."""
         request_id = str(uuid4())
         if not all(_opaque(value) for value in (request, code, state, launch.verifier)) or (
@@ -145,8 +210,11 @@ class DelegationClient:
         ):
             raise AuthorityError(401, "SOURCE_BINDING_INVALID", request_id, "REAUTHENTICATE")
         result = await self._post("bound-launch-redeem", {
-            "request": request, "code": code, "verifier": launch.verifier, "renewal": "optional",
+            "request": request, "code": code, "verifier": launch.verifier,
+            **({"renewal": "optional"} if renewal else {}),
         }, request_id)
+        if not renewal:
+            return self._redemption(result, None, request_id)
         status = result.get("renewal_status")
         if status == "eligible":
             return self._redemption(result, 1, request_id)

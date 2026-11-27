@@ -1,0 +1,6 @@
+{
+  "kind": "resource",
+  "audience": "example-resource",
+  "appSlug": "example-target-app",
+  "scopes": ["example:authorized-operation"]
+}

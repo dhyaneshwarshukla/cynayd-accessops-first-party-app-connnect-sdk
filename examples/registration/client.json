@@ -1,0 +1,7 @@
+{
+  "kind": "client",
+  "clientId": "example-app-backend",
+  "appSlug": "example-app",
+  "audiences": [],
+  "scopes": []
+}

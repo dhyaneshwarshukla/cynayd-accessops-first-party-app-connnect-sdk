@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0-rc.9
+
+- Adds the shared confidential host lifecycle, same-origin Fetch and Node HTTP adapters, sealed PostgreSQL host persistence and an atomic resource proof replay store.
+- Adds native FastAPI and Python PostgreSQL adapters, pinned One JWKS lookup and source and resource delegation.
+- Adds the One-hosted unlock modal, framework references and a single onboarding guide with the audited One operator workflow.
+- Documents verified Drive request shapes and the target contracts still needed for other delegated workflows.
+- Candidate qualification uses local One fixtures and PostgreSQL. Authenticated deployment acceptance and restricted registry publication remain release gates.
+
+
 ## 0.6.0-rc.7
 
 - Add the shared browser host-session client for status, launch, recovery and local logout.
