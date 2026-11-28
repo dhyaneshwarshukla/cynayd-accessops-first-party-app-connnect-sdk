@@ -1,0 +1,34 @@
+{
+  "appSlug": "cynayd-vault",
+  "assertion": {
+    "kid": "cynayd-vault-rc9-rsa-20261128",
+    "notAfter": "2027-02-26T04:31:58Z",
+    "notBefore": "2026-11-28T04:31:58Z",
+    "publicJwk": {
+      "e": "AQAB",
+      "kty": "RSA",
+      "n": "rLzTA6wBWCBxHh4tjDZ01g9hJmGNhXYEyyRnpYPMOtDg6dO5Ai96aoO5qpcTdfD4NpY-poseBRP-uotjy7qvXPxbo_nFI6vNj0NSLtAc74QVrdCd2ZS6zr1xtk_ACxG-JRHgcsXo48qMYxvsFeTPzz2379D79bWpU5vgLVJRGSRvoWl7yRCe_n_Lqj6T0fIbE9EaoPztruGGgS7hPx4NYPG_I5alBDe5U1udDvbdtjTdq_v6lBdbec0qT3eEykFv_TsaA-LWZuzdUMZb53_ScpG_OYjWuch7sf8vfYlcrjUeHA47yu5PZIIddzA2qrjo8mhztSvJRYAODKfU_KUHjCAL6C2TnVn27PAtgTPAZMyds4TnUbFsjyJjzcKzWc49TYFSJpeiZLFLUsjXU7dikvR1M7kTWk1tBOiLTT_HH480-CFHvqrw0Fwz6PMoRy8c7pHvkzCJeZDxMrCpESoQJxmcexYNwnedOWIdyhLfr-0Qc5IpcEx8EtNqjrkRPMI7"
+    }
+  },
+  "client": {
+    "audiences": [],
+    "scopes": []
+  },
+  "clientId": "cynayd-vault-host",
+  "grants": [],
+  "installations": [
+    {
+      "installationId": "73dc5cbc-b88b-4511-8a64-00276ce0e23e",
+      "organizationId": "cmiktjw42000rupjsnjgv89kb"
+    }
+  ],
+  "mode": "create",
+  "profile": {
+    "callback": "https://vault.cynayd.com/api/auth/one/callback",
+    "landing": "https://vault.cynayd.com/",
+    "proofThumbprints": [
+      "gujWY-Uzd0MgbiynKHToT9JugxqO8BBLxCpf_y5Votk"
+    ]
+  },
+  "version": 1
+}
