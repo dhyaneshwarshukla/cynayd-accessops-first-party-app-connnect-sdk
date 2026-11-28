@@ -2,6 +2,8 @@
 
 Checked on November 25, 2026 UTC. The running Identity registry has an active Drive resource `cynayd-drive` with `drive:read` and `drive:write`. Its active introspection client is `cynayd-drive-resource`, KID `cynayd-drive-rsa-20261027-82c4a06e1d`, RSA 3072, registered through 2027-01-25 04:42:39.306 UTC. Its client scope list is `drive:read`.
 
+RC.9 host reuse registers proof thumbprint `E_lxQWwMMDVaxmaXPl_rdZ7bficE9wqP3icxMbPg2Ew`. Drive resource introspection must use that same P-256 proof key (`DRIVE_ONE_HOST_PROOF_KEY_FILE` / `one-host-proof-p256.pem`). A stale `ONE_DELEGATION_PROOF_KEY_FILE` pointing at a pre-RC.9 proof PEM causes One `403 unauthorized_client` on introspect, which Drive previously surfaced as HTTP `503 DRIVE_TEMPORARILY_UNAVAILABLE` on `/api/interapp/*`.
+
 **The introspection client does not need `drive:write` to verify a write token.** One authenticates the resource caller and checks the requested audience belongs to its app. It then checks the token’s scopes against the original **source** client, resource and tenant grant. The regression runs One’s actual exchange and introspection logic for Connect, Docs and Grid fixtures, with a Drive introspection client restricted to `drive:read`. Both scopes introspect as active. This is separate from Drive’s per-operation scope check and ACL. No registry change is proposed for this client.
 
 ## Deployment evidence and limits
